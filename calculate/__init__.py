@@ -12,7 +12,7 @@ from .confidence import confidenceIntervalHelper
 from .loss import fractionIncorrect
 from .loss import meanAbsoluteError
 from .loss import meanFeaturewiseRootMeanSquareError
-from .loss import rootMeanSquareError
+from .loss import rootMeanSquareLoss
 from .loss import varianceFractionRemaining
 from .matrix import elementwiseMultiply
 from .matrix import elementwisePower
