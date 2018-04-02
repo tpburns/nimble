@@ -64,36 +64,35 @@ def _computeError(knownValues, predictedValues, loopFunction, compressionFunctio
     """
     Generic function to compute different kinds of error metrics.
 
-    knownValues - 1D Base object with one known label (or number) per row.
+    knownValues - 1D Base object with one known label (or number) per row/feature.
 
-    predictedValues - 1D Base object with one predictedLabel (or score) per row.
+    predictedValues - 1D Base object with one predictedLabel (or score) per row/feature.
 
-    loopFunction - is a function to be applied to each row in knownValues/predictedValues, 
-    that takes 3 arguments: a known class label, a predicted label, and runningTotal, 
-    which contains the successive output of loopFunction.
+    loopFunction - is a function to be applied to each row/feature in knownValues/predictedValues, 
+    that takes two arguments: a known class label and a predicted label.
 
-    compressionFunction - is a function that should take two arguments: runningTotal, the final
-    output of loopFunction, and n, the number of values in knownValues/predictedValues.
+    compressionFunction - is a function that should take two arguments: summatory and n,
+    the number of values in knownValues/predictedValues.
 
-    The ith row in knownValues are assume refer to the same point as the ith row in predictedValues.
+    The ith row/features in knownValues are assume refer to the same point as the ith row in predictedValues.
     """
     # loop_function_map = map(loopFunction, knownValues, predictedValues)
-    # runningTotal = sum(loop_function_map)
+    # summatory = sum(loop_function_map)
     n = len(predictedValues)
-    runningTotal = 0.0
+    summatory = 0.0
     for aV, pV in zip(knownValues, predictedValues):
-        runningTotal += loopFunction(aV, pV)
+        summatory += loopFunction(aV, pV)
 
-    # print ('runningTotal: {}'.format(runningTotal))
+    # print ('summatory: {}'.format(summatory))
     try:
         # provide the final value from loopFunction to compressionFunction, along with the
         # number of values looped over
-        runningTotal = compressionFunction(runningTotal, n)
+        summatory = compressionFunction(summatory, n)
     except ZeroDivisionError:
         raise ZeroDivisionError(
             'Tried to divide by zero when calculating performance metric')
 
-    return runningTotal
+    return summatory
 
 
 ##################
