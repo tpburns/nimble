@@ -9,10 +9,19 @@ versions here are functions, and take any inputs as arguments.
 
 from __future__ import absolute_import
 from .confidence import confidenceIntervalHelper
-from .loss import fractionIncorrect
+
+from .loss import meanSquareLoss
+from .loss import rootMeanSquareLoss
+from .loss import sumSquareLoss
+from .loss import crossEntropyLoss
+from .loss import exponentialLoss
+from .loss import quadraticLoss
+from .loss import hingeLoss
+from .loss import fractionIncorrectLoss
+from .loss import l2Loss
+from .loss import l1Loss
 from .loss import meanAbsoluteError
 from .loss import meanFeaturewiseRootMeanSquareError
-from .loss import rootMeanSquareLoss
 from .loss import varianceFractionRemaining
 from .matrix import elementwiseMultiply
 from .matrix import elementwisePower
@@ -34,11 +43,14 @@ from .statistic import residuals
 from .statistic import standardDeviation
 from .utility import detectBestResult
 
-__all__ = ['confidenceIntervalHelper', 'correlation', 'cosineSimilarity',
+__all__ = ['confidenceIntervalHelper', 'meanSquareLoss', 'rootMeanSquareLoss',
+           'sumSquareLoss', 'crossEntropyLoss', 'exponentialLoss',
+           'quadraticLoss', 'hingeLoss', 'fractionIncorrectLoss', 'l2Loss',
+           'l1Loss', 'correlation', 'cosineSimilarity',
            'covariance', 'detectBestResult', 'elementwiseMultiply',
-           'elementwisePower', 'fractionCorrect', 'fractionIncorrect',
+           'elementwisePower', 'fractionCorrect',
            'maximum', 'mean', 'meanAbsoluteError',
            'meanFeaturewiseRootMeanSquareError', 'median', 'mode', 'minimum',
            'proportionMissing', 'proportionZero', 'quartiles',
-           'residuals', 'rSquared', 'rootMeanSquareError', 'standardDeviation',
+           'residuals', 'rSquared', 'standardDeviation',
            'uniqueCount', 'varianceFractionRemaining']
