@@ -175,9 +175,9 @@ def sumSquareLoss_alt(knownValues, predictedValues):
     return meanSquareLoss_alt(knownValues, predictedValues) * len(predictedValues)
 
 
-################
-# crossEntropy #
-################
+####################
+# crossEntropyLoss #
+####################
 
 def crossEntropyLoss(knownValues, predictedValues, eps=1e-15):
     """
