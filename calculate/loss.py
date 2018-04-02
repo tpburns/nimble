@@ -11,7 +11,6 @@ import numpy
 
 import UML
 from UML.data import Base
-from UML.data import Matrix
 from math import sqrt, log, exp
 
 from UML.exceptions import ArgumentException
