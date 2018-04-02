@@ -16,13 +16,19 @@ from math import sqrt, log, exp
 
 from UML.exceptions import ArgumentException
 from six.moves import range
+try:
+    import itertools.izip as zip
+except ImportError:
+    pass
+
+from sklearn.metrics import mean_squared_error, log_loss, hinge_loss
 
 # TODO check that min optimal value actually makes sense for all computations
 
 
 def _validateValues(values):
     if not isinstance(values, Base):
-        msg = "knownValues and predictedValues must be derived class of UML.data.Base"
+        msg = 'knownValues and predictedValues must be derived class of UML.data.Base'
         raise ArgumentException(msg)
 
     if values.features > 1 and values.points > 1:
@@ -36,27 +42,23 @@ def _validateValues(values):
         raise ArgumentException(msg)
 
 
-def _validateMatchShapes(knownValues, predictedValues):
-    if knownValues.features != predictedValues.features:
-        msg = "knownValues and predictedValues must have the same number of features"
-        raise ArgumentException(msg)
-
-    if knownValues.points != predictedValues.points:
-        msg = "knownValues and predictedValues must have the same number of points"
+def _validateNumOfElements(knownValues, predictedValues):
+    if len(knownValues) != len(predictedValues):
+        msg = "knownValues and predictedValues must have the same number of elements"
         raise ArgumentException(msg)
 
 
 def _validate(knownValues, predictedValues):
     _validateValues(knownValues)
     _validateValues(predictedValues)
-    _validateMatchShapes(knownValues, predictedValues)
+    _validateNumOfElements(knownValues, predictedValues)
 
 
-def _toMatrix(values):
-    if values.features > 1 and values.points == 1:
-        return values.copyAs('Matrix', rowsArePoints=False)
+def _toNumpyArray(values):
+    if values.points > 1:
+        return values.copyAs('numpy array', rowsArePoints=False)
     else:
-        return values.copyAs('Matrix', rowsArePoints=True)
+        return values.copyAs('numpy array', rowsArePoints=True)
 
 
 def _computeError(knownValues, predictedValues, loopFunction, compressionFunction):
@@ -76,27 +78,28 @@ def _computeError(knownValues, predictedValues, loopFunction, compressionFunctio
 
     The ith row in knownValues are assume refer to the same point as the ith row in predictedValues.
     """
-    knownValues = _toMatrix(knownValues)
-    predictedValues = _toMatrix(predictedValues)
-
-    n = 0.0
+    # loop_function_map = map(loopFunction, knownValues, predictedValues)
+    # runningTotal = sum(loop_function_map)
+    n = len(predictedValues)
     runningTotal = 0.0
     for aV, pV in zip(knownValues, predictedValues):
-        runningTotal = loopFunction(aV, pV, runningTotal)
-        n += 1
-    if n > 0:
-        try:
-            # provide the final value from loopFunction to compressionFunction, along with the
-            # number of values looped over
-            runningTotal = compressionFunction(runningTotal, n)
-        except ZeroDivisionError:
-            raise ZeroDivisionError(
-                'Tried to divide by zero when calculating performance metric')
-    else:
-        raise ArgumentException("Empty argument(s) in error calculator")
+        runningTotal += loopFunction(aV, pV)
+
+    # print ('runningTotal: {}'.format(runningTotal))
+    try:
+        # provide the final value from loopFunction to compressionFunction, along with the
+        # number of values looped over
+        runningTotal = compressionFunction(runningTotal, n)
+    except ZeroDivisionError:
+        raise ZeroDivisionError(
+            'Tried to divide by zero when calculating performance metric')
 
     return runningTotal
 
+
+##################
+# meanSquareLoss #
+##################
 
 def meanSquareLoss(knownValues, predictedValues):
     """
@@ -105,12 +108,50 @@ def meanSquareLoss(knownValues, predictedValues):
     """
     _validate(knownValues, predictedValues)
     return _computeError(knownValues, predictedValues,
-                         lambda x, y, z: z + (y - x) ** 2,
+                         lambda x, y: (y - x)**2,
                          lambda x, y: x / y)
 
 
 meanSquareLoss.optimal = 'min'
 
+
+def meanSquareLoss_alt(knownValues, predictedValues):
+    """
+    Compute the mean square error.  Assumes that knownValues and predictedValues contain
+    numerical values, rather than categorical data.
+    """
+    _validate(knownValues, predictedValues)
+    knownValues = knownValues.copyAs('numpy array')
+    predictedValues = predictedValues.copyAs('numpy array')
+    return (mean_squared_error(knownValues, predictedValues))
+
+
+######################
+# rootMeanSquareLoss #
+######################
+
+def rootMeanSquareLoss(knownValues, predictedValues):
+    """
+    Compute the root mean square error.  Assumes that knownValues and predictedValues contain
+    numerical values, rather than categorical data.
+    """
+    return sqrt(meanSquareLoss(knownValues, predictedValues))
+
+
+rootMeanSquareLoss.optimal = 'min'
+
+
+def rootMeanSquareLoss_alt(knownValues, predictedValues):
+    """
+    Compute the root mean square error.  Assumes that knownValues and predictedValues contain
+    numerical values, rather than categorical data.
+    """
+    return sqrt(meanSquareLoss_alt(knownValues, predictedValues))
+
+
+#################
+# sumSquareLoss #
+#################
 
 def sumSquareLoss(knownValues, predictedValues):
     """
@@ -119,38 +160,74 @@ def sumSquareLoss(knownValues, predictedValues):
     """
     _validate(knownValues, predictedValues)
     return _computeError(knownValues, predictedValues,
-                         lambda x, y, z: z + (y - x) ** 2,
+                         lambda x, y: (y - x) ** 2,
                          lambda x, y: x)
 
 
 sumSquareLoss.optimal = 'min'
 
 
-def rootMeanSquareLoss(knownValues, predictedValues):
+def sumSquareLoss_alt(knownValues, predictedValues):
     """
-    Compute the root mean square error.  Assumes that knownValues and predictedValues contain
+    Compute the sum square error.  Assumes that knownValues and predictedValues contain
     numerical values, rather than categorical data.
     """
-    _validate(knownValues, predictedValues)
-    return sqrt(meanSquareLoss(knownValues, predictedValues))
+    return meanSquareLoss_alt(knownValues, predictedValues) * len(predictedValues)
 
 
-rootMeanSquareLoss.optimal = 'min'
+################
+# crossEntropy #
+################
 
-
-def crossEntropyLoss(knownValues, predictedValues):
+def crossEntropyLoss(knownValues, predictedValues, eps=1e-15):
     """
     Compute the cross-entropy loss.  Assumes that knownValues and predictedValues contain
     numerical values, rather than categorical data.
-    TODO Values should be probabilities? check if so
+
+    knownValues should labels 0 or 1. 
+
+    predictedValues should be probabilities.
+    TODO Should we just support more labels?
     """
+    for k, p in zip(knownValues, predictedValues):
+        # print(k, p)
+        if k != 1 and k != 0:
+            msg = 'knownValues classes should be labels 0 or 1.'
+            raise ArgumentException(msg)
+
+        if p > 1 or p < 0:
+            msg = ('predictedValues for cross entropy loss involved values from a logistic'
+                   'regression model correspond to probabilities between 0 and 1.')
+            raise ArgumentException(msg)
+
+        def loopFuction(x, y):
+            if y == 0 or y == 1:
+                numpy.clip(y, eps, 1 - eps)
+            return (x * log(y)) + ((1 - x) * log(1 - y))
+
     _validate(knownValues, predictedValues)
     return _computeError(knownValues, predictedValues,
-                         lambda x, y, z: z + (x * log(y, 10)),
+                         lambda x, y: ((x * log(y)) + ((1 - x) * log(1 - y))),
                          lambda x, y: -x / y)
 
 
 crossEntropyLoss.optimal = 'min'
+
+
+def crossEntropyLoss_alt(knownValues, predictedValues):
+    """
+    Compute the cross-entropy loss.  Assumes that knownValues and predictedValues contain
+    numerical values, rather than categorical data.
+    """
+    _validate(knownValues, predictedValues)
+    knownValues = _toNumpyArray(knownValues)
+    predictedValues = _toNumpyArray(predictedValues)
+    return log_loss(knownValues, predictedValues) / predictedValues.shape[1]
+
+
+###################
+# exponentialLoss #
+###################
 
 
 def exponentialLoss(knownValues, predictedValues, tau):
@@ -158,28 +235,132 @@ def exponentialLoss(knownValues, predictedValues, tau):
     Compute exponetialLoss. Assumes that knownValues and predictedValues contain
     numerical values, rather than categorical data.
     """
+
     _validate(knownValues, predictedValues)
-    # TODO check valid values for tau exception when 0
-    return _computeError(knownValues, predictedValues,
-                         lambda x, y, z: z + (y - x) ** 2,
-                         lambda x, y: tau * exp(1 / tau * x))
+    if tau == 0:
+        msg = 'tau needs to be different than zero'
+        raise ZeroDivisionError(msg)
+
+    try:
+        return _computeError(knownValues, predictedValues,
+                             lambda x, y: (y - x) ** 2,
+                             lambda x, y: (tau * exp(x / tau) / y))
+    except OverflowError:
+        msg = ('Exponent computation not possible. The function works better when values '
+               'between 0 and 1 are given. Also, changing tau value could help')
+        raise OverflowError(msg)
 
 
 exponentialLoss.optimal = 'min'
 
 
+#################
+# quadraticLoss #
+#################
+
+
 def quadraticLoss(knownValues, predictedValues):
     """
-    Compute exponetialLoss. Assumes that knownValues and predictedValues contain
+    Compute hingeLoss. Assumes that knownValues and predictedValues contain
     numerical values, rather than categorical data.
     """
-    _validate(knownValues, predictedValues)
     return _computeError(knownValues, predictedValues,
-                         lambda x, y, z: z + (x - y)**2,
-                         lambda x, y: 0.5 * x)
+                         lambda x, y: (x - y)**2,
+                         lambda x, y: 0.5 * x / y)
 
 
 quadraticLoss.optimal = 'min'
+
+
+#############
+# hingeLoss #
+#############
+
+
+def hingeLoss(knownValues, predictedValues):
+    """
+    Compute exponetialLoss. Assumes that knownValues and predictedValues contain
+    numerical values, rather than categorical data.
+    TODO: check how to do it without relying 
+    """
+    _validate(knownValues, predictedValues)
+    knownValues = _toNumpyArray(knownValues)
+    predictedValues = _toNumpyArray(predictedValues)
+    return hinge_loss(knownValues, predictedValues)
+
+
+hingeLoss.optimal = 'min'
+
+
+#########################
+# fractionIncorrectLoss #
+#########################
+
+
+def fractionIncorrectLoss(knownValues, predictedValues):
+    """
+    Compute the proportion of incorrect predictions within a set of instances.
+    Assumes that values in knownValues and predictedValues are categorical.
+    """
+    _validate(knownValues, predictedValues)
+    return _computeError(knownValues, predictedValues,
+                         lambda x, y: 0 if x == y else 1,
+                         lambda x, y: x / y)
+
+
+fractionIncorrectLoss.optimal = 'min'
+
+
+##########
+# l2Loss #
+##########
+
+
+def l2Loss(knownValues, predictedValues):
+    """
+    Compute sum of squares differences.
+    Assumes that values in knownValues and predictedValues are categorical.
+    """
+    _validate(knownValues, predictedValues)
+    return _computeError(knownValues, predictedValues,
+                         lambda x, y: (y - x)**2,
+                         lambda x, y: x)
+
+
+l2Loss.optimal = 'min'
+
+
+##########
+# l1Loss #
+##########
+
+
+def l1Loss(knownValues, predictedValues):
+    """
+    Compute sum of absolute value of differences.
+    Assumes that values in knownValues and predictedValues are categorical.
+    """
+    _validate(knownValues, predictedValues)
+    return _computeError(knownValues, predictedValues,
+                         lambda x, y: abs(y - x),
+                         lambda x, y: x)
+
+
+l1Loss.optimal = 'min'
+
+
+def meanAbsoluteError(knownValues, predictedValues):
+    """
+    Compute mean absolute error. Assumes that knownValues and predictedValues contain
+    numerical values, rather than categorical data.
+    """
+    # _validatePredictedAsLabels(predictedValues)
+    return _computeError(knownValues, predictedValues,
+                         lambda x, y: abs(y - x),
+                         lambda x, y: x / y)
+
+
+meanAbsoluteError.optimal = 'min'
 
 
 def meanFeaturewiseRootMeanSquareError(knownValues, predictedValues):
@@ -203,30 +384,6 @@ def meanFeaturewiseRootMeanSquareError(knownValues, predictedValues):
 
 
 meanFeaturewiseRootMeanSquareError.optimal = 'min'
-
-
-def meanAbsoluteError(knownValues, predictedValues):
-    """
-        Compute mean absolute error. Assumes that knownValues and predictedValues contain
-        numerical values, rather than categorical data.
-    """
-    # _validatePredictedAsLabels(predictedValues)
-    return _computeError(knownValues, predictedValues, lambda x, y, z: z + abs(y - x), lambda x, y: x / y)
-
-
-meanAbsoluteError.optimal = 'min'
-
-
-def fractionIncorrect(knownValues, predictedValues):
-    """
-        Compute the proportion of incorrect predictions within a set of
-        instances.  Assumes that values in knownValues and predictedValues are categorical.
-    """
-    # _validatePredictedAsLabels(predictedValues)
-    return _computeError(knownValues, predictedValues, lambda x, y, z: z if x == y else z + 1, lambda x, y: x / y)
-
-
-fractionIncorrect.optimal = 'min'
 
 
 def varianceFractionRemaining(knownValues, predictedValues):
