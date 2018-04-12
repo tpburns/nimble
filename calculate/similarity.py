@@ -3,7 +3,6 @@ import UML
 import numpy
 
 from UML.exceptions import ArgumentException
-from UML.calculate import fractionIncorrect
 from UML.calculate import varianceFractionRemaining
 
 
