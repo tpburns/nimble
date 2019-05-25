@@ -5,11 +5,9 @@ Class extending Base, using a list of lists to store data.
 from __future__ import division
 from __future__ import absolute_import
 import copy
-import numbers
 from functools import reduce
 
 import numpy
-import six
 from six.moves import range
 from six.moves import zip
 
@@ -274,16 +272,22 @@ class List(Base):
             isEmpty = True
             emptyData = numpy.empty(shape=(len(self.points),
                                            len(self.features)))
+        elementType = self._elementType
+        if elementType is None:
+            arr = numpy.array(self.data)
+            if issubclass(arr.dtype.type, numpy.number):
+                elementType = arr.dtype
+            else:
+                elementType = numpy.object_
         if to in UML.data.available:
             ptNames = self.points._getNamesNoGeneration()
             ftNames = self.features._getNamesNoGeneration()
-            reuseData = True
             if isEmpty:
                 data = numpy.matrix(emptyData)
             elif to == 'List':
                 data = [pt.copy() for pt in self.data]
             else:
-                data = numpy.matrix(self.data)
+                data = numpy.matrix(self.data, dtype=elementType)
             # reuseData=True since we already made copies here
             return createDataNoValidation(to, data, ptNames, ftNames,
                                           reuseData=True)
@@ -292,21 +296,20 @@ class List(Base):
         if to == 'numpyarray':
             if isEmpty:
                 return emptyData
-            return numpy.array(self.data, dtype=self._elementType)
+            return numpy.array(self.data, dtype=elementType)
         if to == 'numpymatrix':
             if isEmpty:
                 return numpy.matrix(emptyData)
-            return numpy.matrix(self.data)
-        if to == 'scipycsc':
+            return numpy.matrix(self.data, dtype=elementType)
+        if to in ['scipycsc', 'scipycsr']:
             if not scipy:
                 msg = "scipy is not available"
                 raise PackageException(msg)
-            return scipy.sparse.csc_matrix(numpy.array(self.data))
-        if to == 'scipycsr':
-            if not scipy:
-                msg = "scipy is not available"
-                raise PackageException(msg)
-            return scipy.sparse.csr_matrix(numpy.array(self.data))
+            asArray = numpy.array(self.data, dtype=elementType)
+            if to == 'scipycsc':
+                return scipy.sparse.csc_matrix(asArray)
+            if to == 'scipycsr':
+                return scipy.sparse.csr_matrix(asArray)
 
     def _fillWith_implementation(self, values, pointStart, featureStart,
                                  pointEnd, featureEnd):
@@ -555,9 +558,7 @@ class List(Base):
                                                   useLog=False)
                     return intermediate.copy(to=to)
 
-                listForm = [[self._source.data[pID][fID] for fID
-                             in range(self._fStart, self._fEnd)]
-                            for pID in range(self._pStart, self._pEnd)]
+                listForm = [list(pt) for pt in self.points]
 
                 if to not in ['List', 'pythonlist']:
                     origData = self.data
@@ -604,6 +605,8 @@ class List(Base):
                 return self.fRange
 
             def __eq__(self, other):
+                if len(self) != len(other):
+                    return False
                 for i, sVal in enumerate(self):
                     oVal = other[i]
                     # check element equality - which is only relevant if one
