@@ -4,7 +4,7 @@ import numpy
 
 import UML
 from UML.exceptions import InvalidArgumentType, InvalidArgumentValue
-from UML.calculate import fractionIncorrect
+from UML.calculate import fractionIncorrectLoss
 from UML.calculate import varianceFractionRemaining
 
 
@@ -92,7 +92,7 @@ def fractionCorrect(knownValues, predictedValues):
     will be a float between 0 and 1 inclusive.
 
     """
-    return 1 - fractionIncorrect(knownValues, predictedValues)
+    return 1 - fractionIncorrectLoss(knownValues, predictedValues)
 
 
 fractionCorrect.optimal = 'max'
