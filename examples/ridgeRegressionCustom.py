@@ -4,20 +4,11 @@ out-of-the-box, custom learner.
 
 """
 
-from __future__ import absolute_import
-from __future__ import print_function
-try:
-    from allowImports import boilerplate
-except:
-    from .allowImports import boilerplate
-
-boilerplate()
+import UML
+from UML.calculate import rootMeanSquareError as RMSE
+from UML.randomness import numpyRandom
 
 if __name__ == "__main__":
-    import UML
-    from UML.calculate import rootMeanSquareError as RMSE
-    from UML.randomness import numpyRandom
-
     # produce some simple linear data
     trainPoints = 10
     testPoints = 5
@@ -28,7 +19,7 @@ if __name__ == "__main__":
     testXRaw = numpyRandom.randint(-10, 10, (testPoints, feats))
     testYRaw = testXRaw.dot(targetCoefs)
 
-    # encapsulate in UML data objects
+    # encapsulate in UML Base objects
     trainX = UML.createData("Matrix", trainXRaw)
     trainY = UML.createData("Matrix", trainYRaw)
     testX = UML.createData("Matrix", testXRaw)
@@ -46,11 +37,12 @@ if __name__ == "__main__":
     assert pred1.isIdentical(pred2)
 
     # Using cross validation to explicitly determine a winning argument set
-    results = UML.crossValidateReturnBest("custom.RidgeRegression", trainX, trainY, RMSE,
-                                          lamb=(0, .5, 1))
-    bestArgument, bestScore = results
+    results = UML.crossValidate("custom.RidgeRegression", trainX, trainY, RMSE,
+                                lamb=UML.CV([0, .5, 1]))
+    bestArguments = results.bestArguments
+    bestScore = results.bestResult
 
-    print("Best argument set: " + str(bestArgument))
+    print("Best argument set: " + str(bestArguments))
     print("Best score: " + str(bestScore))
 
     # Currently, testing can only be done through the top level function trainAndTest()

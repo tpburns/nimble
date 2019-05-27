@@ -1,23 +1,23 @@
 from __future__ import absolute_import
 from __future__ import print_function
-import numpy
 import math
 from math import fabs
 
+import numpy
 from nose.tools import *
 from nose.plugins.attrib import attr
+from six.moves import range
 
 import UML
-
 from UML import learnerType
 from UML import createData
-
-from UML.exceptions import ArgumentException, ImproperActionException
-
+from UML.exceptions import InvalidArgumentValue
+from UML.exceptions import InvalidArgumentValueCombination
+from UML.exceptions import ImproperObjectAction
 from UML.helpers import extractWinningPredictionLabel
 from UML.helpers import generateAllPairs
 from UML.helpers import findBestInterface
-from UML.helpers import makeFoldIterator
+from UML.helpers import FoldIterator
 from UML.helpers import sumAbsoluteDifference
 from UML.helpers import generateClusteredPoints
 from UML.helpers import trainAndTestOneVsOne
@@ -25,13 +25,11 @@ from UML.helpers import trainAndApplyOneVsOne
 from UML.helpers import trainAndApplyOneVsAll
 from UML.helpers import _mergeArguments
 from UML.helpers import computeMetrics
+from UML.helpers import inspectArguments
 from UML.calculate import rootMeanSquareError
 from UML.calculate import meanAbsoluteError
 from UML.calculate import fractionIncorrect
 from UML.randomness import pythonRandom
-from six.moves import range
-
-
 
 ##########
 # TESTER #
@@ -41,13 +39,13 @@ class FoldIteratorTester(object):
     def __init__(self, constructor):
         self.constructor = constructor
 
-    @raises(ArgumentException)
+    @raises(InvalidArgumentValueCombination)
     def test_makeFoldIterator_exceptionPEmpty(self):
-        """ Test makeFoldIterator() for ArgumentException when object is point empty """
+        """ Test makeFoldIterator() for InvalidArgumentValueCombination when object is point empty """
         data = [[], []]
         data = numpy.array(data).T
         toTest = self.constructor(data)
-        makeFoldIterator([toTest], 2)
+        FoldIterator([toTest], 2)
 
     #	@raises(ImproperActionException)
     #	def test_makeFoldIterator_exceptionFEmpty(self):
@@ -58,13 +56,13 @@ class FoldIteratorTester(object):
     #		makeFoldIterator([toTest],2)
 
 
-    @raises(ArgumentException)
+    @raises(InvalidArgumentValue)
     def test_makeFoldIterator_exceptionTooManyFolds(self):
         """ Test makeFoldIterator() for exception when given too many folds """
         data = [[1], [2], [3], [4], [5]]
         names = ['col']
         toTest = self.constructor(data, names)
-        makeFoldIterator([toTest, toTest], 6)
+        FoldIterator([toTest, toTest], 6)
 
 
     def test_makeFoldIterator_verifyPartitions(self):
@@ -72,7 +70,7 @@ class FoldIteratorTester(object):
         data = [[1], [2], [3], [4], [5]]
         names = ['col']
         toTest = self.constructor(data, names)
-        folds = makeFoldIterator([toTest], 2)
+        folds = FoldIterator([toTest], 2)
 
         [(fold1Train, fold1Test)] = next(folds)
         [(fold2Train, fold2Test)] = next(folds)
@@ -83,18 +81,18 @@ class FoldIteratorTester(object):
         except StopIteration:
             pass
 
-        assert fold1Train.points + fold1Test.points == 5
-        assert fold2Train.points + fold2Test.points == 5
+        assert len(fold1Train.points) + len(fold1Test.points) == 5
+        assert len(fold2Train.points) + len(fold2Test.points) == 5
 
-        fold1Train.appendPoints(fold1Test)
-        fold2Train.appendPoints(fold2Test)
+        fold1Train.points.add(fold1Test)
+        fold2Train.points.add(fold2Test)
 
     def test_makeFoldIterator_verifyPartitions_Unsupervised(self):
         """ Test makeFoldIterator() yields the correct number folds and partitions the data, with a None data """
         data = [[1], [2], [3], [4], [5]]
         names = ['col']
         toTest = self.constructor(data, names)
-        folds = makeFoldIterator([toTest, None], 2)
+        folds = FoldIterator([toTest, None], 2)
 
         [(fold1Train, fold1Test), (fold1NoneTrain, fold1NoneTest)] = next(folds)
         [(fold2Train, fold2Test), (fold2NoneTrain, fold2NoneTest)] = next(folds)
@@ -105,11 +103,11 @@ class FoldIteratorTester(object):
         except StopIteration:
             pass
 
-        assert fold1Train.points + fold1Test.points == 5
-        assert fold2Train.points + fold2Test.points == 5
+        assert len(fold1Train.points) + len(fold1Test.points) == 5
+        assert len(fold2Train.points) + len(fold2Test.points) == 5
 
-        fold1Train.appendPoints(fold1Test)
-        fold2Train.appendPoints(fold2Test)
+        fold1Train.points.add(fold1Test)
+        fold2Train.points.add(fold2Test)
 
         assert fold1NoneTrain is None
         assert fold1NoneTest is None
@@ -128,7 +126,7 @@ class FoldIteratorTester(object):
         data2 = [[-1], [-2], [-3], [-4], [-5], [-6], [-7]]
         toTest2 = self.constructor(data2)
 
-        folds = makeFoldIterator([toTest0, toTest1, toTest2], 2)
+        folds = FoldIterator([toTest0, toTest1, toTest2], 2)
 
         fold0 = next(folds)
         fold1 = next(folds)
@@ -142,14 +140,14 @@ class FoldIteratorTester(object):
             pass
 
         # check that the partitions are the right size (ie, no overlap in training and testing)
-        assert fold0Train0.points + fold0Test0.points == 7
-        assert fold1Train0.points + fold1Test0.points == 7
+        assert len(fold0Train0.points) + len(fold0Test0.points) == 7
+        assert len(fold1Train0.points) + len(fold1Test0.points) == 7
 
-        assert fold0Train1.points + fold0Test1.points == 7
-        assert fold1Train1.points + fold1Test1.points == 7
+        assert len(fold0Train1.points) + len(fold0Test1.points) == 7
+        assert len(fold1Train1.points) + len(fold1Test1.points) == 7
 
-        assert fold0Train2.points + fold0Test2.points == 7
-        assert fold1Train2.points + fold1Test2.points == 7
+        assert len(fold0Train2.points) + len(fold0Test2.points) == 7
+        assert len(fold1Train2.points) + len(fold1Test2.points) == 7
 
         # check that the data is in the same order accross objects, within
         # the training or testing sets of a single fold
@@ -161,13 +159,13 @@ class FoldIteratorTester(object):
                 testList.append(test)
 
             for train in trainList:
-                assert train.points == trainList[0].points
-                for index in range(train.points):
+                assert len(train.points) == len(trainList[0].points)
+                for index in range(len(train.points)):
                     assert fabs(train[index, 0]) == fabs(trainList[0][index, 0])
 
             for test in testList:
-                assert test.points == testList[0].points
-                for index in range(test.points):
+                assert len(test.points) == len(testList[0].points)
+                for index in range(len(test.points)):
                     assert fabs(test[index, 0]) == fabs(testList[0][index, 0])
 
 
@@ -218,19 +216,19 @@ def testClassifyAlgorithms(printResultsDontThrow=False):
         findBestInterface('sciKitLearn')
         knownAlgorithmToTypeHash['sciKitLearn.RadiusNeighborsClassifier'] = 'classification'
         knownAlgorithmToTypeHash['sciKitLearn.RadiusNeighborsRegressor'] = 'regression'
-    except ArgumentException:
+    except InvalidArgumentValue:
         pass
     try:
         findBestInterface('mlpy')
         knownAlgorithmToTypeHash['mlpy.LDAC'] = 'classification'
         knownAlgorithmToTypeHash['mlpy.Ridge'] = 'regression'
-    except ArgumentException:
+    except InvalidArgumentValue:
         pass
     try:
         findBestInterface('shogun')
         knownAlgorithmToTypeHash['shogun.MulticlassOCAS'] = 'classification'
         knownAlgorithmToTypeHash['shogun.LibSVR'] = 'regression'
-    except ArgumentException:
+    except InvalidArgumentValue:
         pass
 
     for curAlgorithm in knownAlgorithmToTypeHash.keys():
@@ -259,13 +257,13 @@ def testGenerateClusteredPoints():
     dataset, labelsObj, noiselessLabels = generateClusteredPoints(clusterCount, pointsPer, featuresPer,
                                                                   addFeatureNoise=True, addLabelNoise=True,
                                                                   addLabelColumn=True)
-    pts, feats = noiselessLabels.points, noiselessLabels.features
+    pts, feats = len(noiselessLabels.points), len(noiselessLabels.features)
     for i in range(pts):
         for j in range(feats):
             #assert that the labels don't have noise in noiselessLabels
             assert (noiselessLabels[i, j] % 1 == 0.0)
 
-    pts, feats = dataset.points, dataset.features
+    pts, feats = len(dataset.points), len(dataset.features)
     for i in range(pts):
         for j in range(feats):
             #assert dataset has noise for all entries
@@ -274,13 +272,13 @@ def testGenerateClusteredPoints():
     dataset, labelsObj, noiselessLabels = generateClusteredPoints(clusterCount, pointsPer, featuresPer,
                                                                   addFeatureNoise=False, addLabelNoise=False,
                                                                   addLabelColumn=True)
-    pts, feats = noiselessLabels.points, noiselessLabels.features
+    pts, feats = len(noiselessLabels.points), len(noiselessLabels.features)
     for i in range(pts):
         for j in range(feats):
             #assert that the labels don't have noise in noiselessLabels
             assert (noiselessLabels[i, j] % 1 == 0.0)
 
-    pts, feats = dataset.points, dataset.features
+    pts, feats = len(dataset.points), len(dataset.features)
     for i in range(pts):
         for j in range(feats):
             #assert dataset has no noise for all entries
@@ -290,7 +288,7 @@ def testGenerateClusteredPoints():
     dataset, labelsObj, noiselessLabels = generateClusteredPoints(clusterCount, pointsPer, featuresPer,
                                                                   addFeatureNoise=False, addLabelNoise=False,
                                                                   addLabelColumn=False)
-    labelColumnlessRows, labelColumnlessCols = dataset.points, dataset.features
+    labelColumnlessRows, labelColumnlessCols = len(dataset.points), len(dataset.features)
     #columnLess should have one less column in the DATASET, rows should be the same
     assert (labelColumnlessCols - feats == -1)
     assert (labelColumnlessRows - pts == 0)
@@ -300,7 +298,7 @@ def testGenerateClusteredPoints():
     allNoiseDataset, labsObj, noiselessLabels = generateClusteredPoints(clusterCount, pointsPer, featuresPer,
                                                                         addFeatureNoise=True, addLabelNoise=True,
                                                                         addLabelColumn=True)
-    pts, feats = allNoiseDataset.points, allNoiseDataset.features
+    pts, feats = len(allNoiseDataset.points), len(allNoiseDataset.features)
     for curRow in range(pts):
         for curCol in range(feats):
             #assert dataset has no noise for all entries
@@ -314,7 +312,7 @@ def testGenerateClusteredPoints():
 
 
 def testSumDifferenceFunction():
-    """ Function verifies that for different shaped matricies, generated via createData, sumAbsoluteDifference() throws an ArgumentException."""
+    """ Function verifies that for different shaped matricies, generated via createData, sumAbsoluteDifference() throws an InvalidArgumentValueCombination."""
 
     data1 = [[1, 0, 0, 1], [0, 1, 0, 2], [0, 0, 1, 3], [1, 0, 0, 1], [0, 1, 0, 2], [0, 0, 1, 3], [1, 0, 0, 1],
              [0, 1, 0, 2], [0, 0, 1, 3], [1, 0, 0, 1], [0, 1, 0, 2], [0, 0, 1, 3], [1, 0, 0, 1], [0, 1, 0, 2],
@@ -327,7 +325,7 @@ def testSumDifferenceFunction():
     failedShape = False
     try:
         result = sumAbsoluteDifference(matrix1, matrix2)
-    except ArgumentException:
+    except InvalidArgumentValueCombination:
         failedShape = True
     assert (failedShape)
 
@@ -341,7 +339,7 @@ def testSumDifferenceFunction():
     failedShape = False
     try:
         result = sumAbsoluteDifference(matrix1, matrix2)
-    except ArgumentException:
+    except InvalidArgumentValueCombination:
         failedShape = True
     assert (failedShape)
 
@@ -356,7 +354,7 @@ def testSumDifferenceFunction():
     failedShape = False
     try:
         result = sumAbsoluteDifference(matrix1, matrix2)
-    except ArgumentException:
+    except InvalidArgumentValueCombination:
         failedShape = True
     assert (failedShape is False)
 
@@ -405,8 +403,8 @@ def testtrainAndTestOneVsOne():
     results2 = trainAndTestOneVsOne('Custom.KNNClassifier', trainObj2, trainY=3, testX=testObj2, testY=3,
                                     performanceFunction=metricFunc)
 
-    assert results1[0] == 0.0
-    assert results2[0] == 0.25
+    assert results1 == 0.0
+    assert results2 == 0.25
 
 
 def testtrainAndApplyOneVsAll():
@@ -434,10 +432,10 @@ def testtrainAndApplyOneVsAll():
     print("Results 2 output: " + str(results2.data))
     print("Results 3 output: " + str(results3.data))
 
-    assert results1.copyAs(format="python list")[0][0] >= 0.0
-    assert results1.copyAs(format="python list")[0][0] <= 3.0
+    assert results1.copy(to="python list")[0][0] >= 0.0
+    assert results1.copy(to="python list")[0][0] <= 3.0
 
-    assert results2.copyAs(format="python list")[0][0]
+    assert results2.copy(to="python list")[0][0]
 
 
 def testtrainAndApplyOneVsOne():
@@ -469,7 +467,7 @@ def testtrainAndApplyOneVsOne():
     assert results2.data[2][0] == 3.0
     assert results2.data[2][1] == 2
 
-    results3FeatureMap = results3.getFeatureNames()
+    results3FeatureMap = results3.features.getNames()
     for i in range(len(results3.data)):
         row = results3.data[i]
         for j in range(len(row)):
@@ -487,7 +485,7 @@ def testtrainAndApplyOneVsOne():
                     assert results3FeatureMap[j] == str(float(3))
 
 
-@raises(ArgumentException)
+@raises(InvalidArgumentValueCombination)
 def testMergeArgumentsException():
     """ Test helpers._mergeArguments will throw the exception it should """
     args = {1: 'a', 2: 'b', 3: 'd'}
@@ -604,8 +602,8 @@ def testExtractWinningPredictionLabel():
     predictionData = [[1, 3, 3, 2, 3, 2], [2, 3, 3, 2, 2, 2], [1, 1, 1, 1, 1, 1], [4, 4, 4, 3, 3, 3]]
     BaseObj = createData('Matrix', predictionData)
     BaseObj.transpose()
-    predictions = BaseObj.calculateForEachFeature(extractWinningPredictionLabel)
-    listPredictions = predictions.copyAs(format="python list")
+    predictions = BaseObj.features.calculate(extractWinningPredictionLabel)
+    listPredictions = predictions.copy(to="python list")
 
     assert listPredictions[0][0] - 3 == 0.0
     assert listPredictions[0][1] - 2 == 0.0
@@ -638,3 +636,15 @@ def testGenerateAllPairs():
     testList2 = []
     testPairs2 = generateAllPairs(testList2)
     assert testPairs2 is None
+
+def test_inspectArguments():
+
+    def checkSignature(a, b, c, d=False, e=True, f=None, *sigArgs, **sigKwargs):
+        pass
+
+    a, v, k, d = inspectArguments(checkSignature)
+
+    assert a == ['a', 'b', 'c', 'd', 'e', 'f']
+    assert v == 'sigArgs'
+    assert k == 'sigKwargs'
+    assert d == (False, True, None)

@@ -4,23 +4,115 @@ from nose.plugins.attrib import attr
 import tempfile
 import numpy
 import os
+import sys
 import copy
 import itertools
+try:
+    from unittest import mock #python >=3.3
+except:
+    import mock
 
 import UML
-from UML.exceptions import ArgumentException
+from UML.exceptions import InvalidArgumentValue, InvalidArgumentType
 from UML.exceptions import FileFormatException
 from UML.data.dataHelpers import DEFAULT_PREFIX
 from UML.helpers import _intFloatOrString
-scipy = UML.importModule('scipy.sparse')
+# from .. import logger
+from .assertionHelpers import oneLogEntryExpected
 
-#returnTypes = ['Matrix', 'Sparse', None]  # None for auto
+scipy = UML.importModule('scipy.sparse')
+pd = UML.importModule('pandas')
+
 returnTypes = copy.copy(UML.data.available)
 returnTypes.append(None)
+
+class NoIter(object):
+    def __init__(self, vals):
+        self.vals = vals
+
+    def __len__(self):
+        return len(self.vals)
+
+class IterNext(object):
+    def __init__(self, vals):
+        self.vals = vals
+        self.pos = 0
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if self.pos < len(self.vals):
+            self.pos += 1
+            return self.vals[self.pos - 1]
+        else:
+            raise StopIteration()
+
+class GetItemOnly(object):
+    def __init__(self, vals):
+        self.vals = vals
+
+    def __getitem__(self, key):
+        return self.vals[key]
 
 ###########################
 # Data values correctness #
 ###########################
+
+def test_createData_raw_stringConversion():
+    """
+    """
+    for t in returnTypes:
+        values = []
+        toTest = UML.createData(t, [['1','2','3'], ['4','5','6'], ['7','8','9']])
+        for i in range(len(toTest.points)):
+            for j in range(len(toTest.features)):
+                values.append(toTest[i,j])
+        assert all(isinstance(val, float) for val in values)
+
+def test_createData_raw_noStringConversion():
+    """
+    """
+    for t in returnTypes:
+        values = []
+        toTest = UML.createData(t, [['1','2','3'], ['4','5','6'], ['7','8','9']], elementType=object)
+        for i in range(len(toTest.points)):
+            for j in range(len(toTest.features)):
+                values.append(toTest[i,j])
+        assert all(isinstance(val, str) for val in values)
+
+def test_createData_raw_invalidPointOrFeatureNames():
+    for t in returnTypes:
+        try:
+            pNames = NoIter(['1', '4'])
+            toTest = UML.createData(t, [[1,2,3], [4,5,6]], pointNames=pNames)
+            assert False # expected InvalidArgumentType
+        except InvalidArgumentType:
+            pass
+
+        try:
+            fNames = NoIter(['a', 'b', 'c'])
+            toTest = UML.createData(t, [[1,2,3], [4,5,6]], featureNames=fNames)
+            assert False # expected InvalidArgumentType
+        except InvalidArgumentType:
+            pass
+
+def test_createData_raw_pointAndFeatureIterators():
+    for t in returnTypes:
+        pNames = IterNext(['1', '4'])
+        fNames = IterNext(['a', 'b', 'c'])
+        toTest1 = UML.createData(t, [[1,2,3], [4,5,6]], pointNames=pNames,
+                                featureNames=fNames)
+        assert toTest1.points.getNames() == ['1', '4']
+        assert toTest1.features.getNames() == ['a', 'b', 'c']
+
+        pNames = GetItemOnly(['1', '4'])
+        fNames = GetItemOnly(['a', 'b', 'c'])
+        toTest2 = UML.createData(t, [[1,2,3], [4,5,6]], pointNames=pNames,
+                                featureNames=fNames)
+        assert toTest2.points.getNames() == ['1', '4']
+        assert toTest2.features.getNames() == ['a', 'b', 'c']
+
 
 def test_createData_CSV_data():
     """ Test of createData() loading a csv file, default params """
@@ -29,6 +121,21 @@ def test_createData_CSV_data():
 
         # instantiate from csv file
         with tempfile.NamedTemporaryFile(suffix=".csv", mode='w') as tmpCSV:
+            tmpCSV.write("1,2,3\n")
+            tmpCSV.flush()
+            objName = 'fromCSV'
+            fromCSV = UML.createData(returnType=t, data=tmpCSV.name, name=objName)
+
+            assert fromList == fromCSV
+
+
+def test_createData_CSV_dataRandomExtension():
+    """ Test of createData() loading a csv file without csv extension """
+    for t in returnTypes:
+        fromList = UML.createData(returnType=t, data=[[1, 2, 3]])
+
+        # instantiate from csv file
+        with tempfile.NamedTemporaryFile(suffix=".foo", mode='w') as tmpCSV:
             tmpCSV.write("1,2,3\n")
             tmpCSV.flush()
             objName = 'fromCSV'
@@ -101,6 +208,27 @@ def test_createData_MTXArr_data():
             else:
                 assert fromList == fromMTXArr
 
+def test_createData_MTXArr_dataRandomExtension():
+    """ Test of createData() loading a mtx (arr format) file without mtx extension """
+    for t in returnTypes:
+        fromList = UML.createData(returnType=t, data=[[1, 2, 3]])
+
+        # instantiate from mtx array file
+        with tempfile.NamedTemporaryFile(suffix=".foo", mode='w') as tmpMTXArr:
+            tmpMTXArr.write("%%MatrixMarket matrix array integer general\n")
+            tmpMTXArr.write("1 3\n")
+            tmpMTXArr.write("1\n")
+            tmpMTXArr.write("2\n")
+            tmpMTXArr.write("3\n")
+            tmpMTXArr.flush()
+            objName = 'fromMTXArr'
+            fromMTXArr = UML.createData(returnType=t, data=tmpMTXArr.name, name=objName)
+
+            if t is None and fromList.getTypeString() != fromMTXArr.getTypeString():
+                assert fromList.isApproximatelyEqual(fromMTXArr)
+            else:
+                assert fromList == fromMTXArr
+
 
 def test_createData_MTXCoo_data():
     """ Test of createData() loading a mtx (coo format) file, default params """
@@ -123,16 +251,36 @@ def test_createData_MTXCoo_data():
             else:
                 assert fromList == fromMTXCoo
 
+def test_createData_MTXCoo_dataRandomExtension():
+    """ Test of createData() loading a mtx (coo format) file without mtx extension """
+    for t in returnTypes:
+        fromList = UML.createData(returnType=t, data=[[1, 2, 3]])
+
+        # instantiate from mtx coordinate file
+        with tempfile.NamedTemporaryFile(suffix=".foo", mode='w') as tmpMTXCoo:
+            tmpMTXCoo.write("%%MatrixMarket matrix coordinate integer general\n")
+            tmpMTXCoo.write("1 3 3\n")
+            tmpMTXCoo.write("1 1 1\n")
+            tmpMTXCoo.write("1 2 2\n")
+            tmpMTXCoo.write("1 3 3\n")
+            tmpMTXCoo.flush()
+            objName = 'fromMTXCoo'
+            fromMTXCoo = UML.createData(returnType=t, data=tmpMTXCoo.name, name=objName)
+
+            if t is None and fromList.getTypeString() != fromMTXCoo.getTypeString():
+                assert fromList.isApproximatelyEqual(fromMTXCoo)
+            else:
+                assert fromList == fromMTXCoo
+
 
 @raises(FileFormatException)
 def test_createData_CSV_unequalRowLength_short():
     with tempfile.NamedTemporaryFile(suffix=".csv", mode='w') as tmpCSV:
-        tmpCSV.write("1,2,3,4\n")
-        tmpCSV.write("4,5,6\n")
+        tmpCSV.write('1,2,3,4\n')
+        tmpCSV.write('4,5,6\n')
         tmpCSV.flush()
 
         UML.createData(returnType="List", data=tmpCSV.name)
-
 
 @raises(FileFormatException)
 def test_createData_CSV_unequalRowLength_long():
@@ -169,6 +317,7 @@ def test_createData_CSV_unequalRowLength_position():
             UML.createData(returnType="List", data=tmpCSV.name, featureNames=True)
             assert False  # the previous call should have raised an exception
         except FileFormatException as ffe:
+            print(ffe.value)
             # We expect a message of the format:
             #
             assert '1' in ffe.value  # defining line
@@ -293,7 +442,7 @@ def test_names_AutoDetectedBlankLines_CSV():
         tmpCSV = tempfile.NamedTemporaryFile(suffix=".csv", mode='w')
         tmpCSV.write("\n")
         tmpCSV.write("\n")
-        tmpCSV.write("point_names,one,two,three\n")
+        tmpCSV.write("pointNames,one,two,three\n")
         tmpCSV.write("pn1,1,2,3\n")
         tmpCSV.flush()
 
@@ -330,7 +479,7 @@ def test_pointNames_AutoDetected_from_specified_featNames_CSV():
         tmpCSV = tempfile.NamedTemporaryFile(suffix=".csv", mode='w')
         tmpCSV.write("\n")
         tmpCSV.write("\n")
-        tmpCSV.write("point_names,one,two,three\n")
+        tmpCSV.write("pointNames,one,two,three\n")
         tmpCSV.write("pn1,1,2,3\n")
         tmpCSV.flush()
         fromCSV = UML.createData(returnType=t, data=tmpCSV.name, featureNames=True)
@@ -378,7 +527,7 @@ def helper_auto(rawStr, rawType, returnType, pointNames, featureNames):
             npRaw = numpy.array(lolFromRaw, dtype=object)
             finalRaw = scipy.sparse.coo_matrix(npRaw)
         else:
-            finalRaw = baseObj.copyAs(rawType)
+            finalRaw = baseObj.copy(to=rawType)
 
         ret = UML.createData(returnType=returnType, data=finalRaw,
                              pointNames=pointNames, featureNames=featureNames)
@@ -397,17 +546,17 @@ def test_automaticByType_fnames_rawAndCSV():
         # example which triggers automatic removal
         correctRaw = "fname0,fname1,fname2\n1,2,3\n"
         correct = helper_auto(correctRaw, rawT, retT, pointNames='automatic', featureNames='automatic')
-        assert correct.getFeatureNames() == ['fname0','fname1','fname2']
+        assert correct.features.getNames() == ['fname0','fname1','fname2']
 
         # example where first line contains a non-string interpretable value
         nonStringFail1Raw = "fname0,1.0,fname2\n1,2,3"
         fail1 = helper_auto(nonStringFail1Raw, rawT, retT, pointNames='automatic', featureNames='automatic')
-        assert all(map(lambda x: x.startswith(DEFAULT_PREFIX), fail1.getFeatureNames()))
+        assert all(map(lambda x: x.startswith(DEFAULT_PREFIX), fail1.features.getNames()))
 
         # example where the first line contains all strings, but second line also contains strings
         sameTypeFail2Raw = "fname0,fname1,fname2\n1,data2,3"
         fail2 = helper_auto(sameTypeFail2Raw, rawT, retT, pointNames='automatic', featureNames='automatic')
-        assert all(map(lambda x: x.startswith(DEFAULT_PREFIX), fail2.getFeatureNames()))
+        assert all(map(lambda x: x.startswith(DEFAULT_PREFIX), fail2.features.getNames()))
 
 
 def test_userOverrideOfAutomaticByType_fnames_rawAndCSV():
@@ -415,18 +564,20 @@ def test_userOverrideOfAutomaticByType_fnames_rawAndCSV():
     for (rawT, retT) in itertools.product(availableRaw, returnTypes):
         # example where user provided False overides automatic detection
         correctRaw = "fname0,fname1,fname2\n1,2,3\n"
-        overide1 = helper_auto(correctRaw, rawT, retT, pointNames='automatic', featureNames=False)
-        assert all(map(lambda x: x.startswith(DEFAULT_PREFIX), overide1.getFeatureNames()))
+        overide1a = helper_auto(correctRaw, rawT, retT, pointNames='automatic', featureNames=False)
+        overide1b = helper_auto(correctRaw, rawT, retT, pointNames='automatic', featureNames=None)
+        assert all(map(lambda x: x.startswith(DEFAULT_PREFIX), overide1a.features.getNames()))
+        assert all(map(lambda x: x.startswith(DEFAULT_PREFIX), overide1b.features.getNames()))
 
         # example where user provided True extracts non-detectable first line
         nonStringFail1Raw = "fname0,1.0,fname2\n1,2,3"
         overide2 = helper_auto(nonStringFail1Raw, rawT, retT, pointNames='automatic', featureNames=True)
-        assert overide2.getFeatureNames() == ['fname0', '1.0', 'fname2']
+        assert overide2.features.getNames() == ['fname0', '1.0', 'fname2']
 
         # example where user provided True extracts non-detectable first line
         sameTypeFail2Raw = "fname0,fname1,fname2\ndata1,data2,data3"
         overide3 = helper_auto(sameTypeFail2Raw, rawT, retT, pointNames='automatic', featureNames=True)
-        assert overide3.getFeatureNames() == ['fname0', 'fname1', 'fname2']
+        assert overide3.features.getNames() == ['fname0', 'fname1', 'fname2']
 
 
 def test_automaticByType_pname_interaction_with_fname():
@@ -436,43 +587,84 @@ def test_automaticByType_pname_interaction_with_fname():
 #        retT = None
 #        print rawT + " " + str(retT)
 #        import pdb
-#        pdb.set_trace()        
+#        pdb.set_trace()
 
         # pnames auto triggered with auto fnames
-        raw = "point_names,fname0,fname1,fname2\npname0,1,2,3\n"
+        raw = "pointNames,fname0,fname1,fname2\npname0,1,2,3\n"
         testObj = helper_auto(raw, rawT, retT, pointNames='automatic', featureNames='automatic')
-        assert testObj.getFeatureNames() == ['fname0','fname1','fname2']
-        assert testObj.getPointNames() == ['pname0']
+        assert testObj.features.getNames() == ['fname0','fname1','fname2']
+        assert testObj.points.getNames() == ['pname0']
 
         # pnames auto triggereed with explicit fnames
-        raw = "point_names,fname0,fname1,fname2\npname0,1,2,3\n"
+        raw = "pointNames,fname0,fname1,fname2\npname0,1,2,3\n"
         testObj = helper_auto(raw, rawT, retT, pointNames='automatic', featureNames=True)
-        assert testObj.getFeatureNames() == ['fname0','fname1','fname2']
-        assert testObj.getPointNames() == ['pname0']
+        assert testObj.features.getNames() == ['fname0','fname1','fname2']
+        assert testObj.points.getNames() == ['pname0']
 
-        #pnames not triggered given 'point_names' at [0,0] when fnames auto trigger fails CASE1
-        raw = "point_names,fname0,1.0,fname2\npname0,1,2,3\n"
+        #pnames not triggered given 'pointNames' at [0,0] when fnames auto trigger fails CASE1
+        raw = "pointNames,fname0,1.0,fname2\npname0,1,2,3\n"
         testObj = helper_auto(raw, rawT, retT, pointNames='automatic', featureNames='automatic')
-        assert all(map(lambda x: x.startswith(DEFAULT_PREFIX), testObj.getFeatureNames()))
-        assert all(map(lambda x: x.startswith(DEFAULT_PREFIX), testObj.getPointNames()))
+        assert all(map(lambda x: x.startswith(DEFAULT_PREFIX), testObj.features.getNames()))
+        assert all(map(lambda x: x.startswith(DEFAULT_PREFIX), testObj.points.getNames()))
 
-        #pnames not triggered given 'point_names' at [0,0] when fnames auto trigger fails CASE2
-        raw = "point_names,fname0,fname1,fname2\npname0,data1,data2,data3\n"
+        #pnames not triggered given 'pointNames' at [0,0] when fnames auto trigger fails CASE2
+        raw = "pointNames,fname0,fname1,fname2\npname0,data1,data2,data3\n"
         testObj = helper_auto(raw, rawT, retT, pointNames='automatic', featureNames='automatic')
-        assert all(map(lambda x: x.startswith(DEFAULT_PREFIX), testObj.getFeatureNames()))
-        assert all(map(lambda x: x.startswith(DEFAULT_PREFIX), testObj.getPointNames()))
+        assert all(map(lambda x: x.startswith(DEFAULT_PREFIX), testObj.features.getNames()))
+        assert all(map(lambda x: x.startswith(DEFAULT_PREFIX), testObj.points.getNames()))
 
-        #pnames not triggered given 'point_names' at [0,0] when fnames explicit False
-        raw = "point_names,fname0,fname1,fname2\npname0,1,2,3\n"
+        #pnames not triggered given 'pointNames' at [0,0] when fnames explicit False
+        raw = "pointNames,fname0,fname1,fname2\npname0,1,2,3\n"
         testObj = helper_auto(raw, rawT, retT, pointNames='automatic', featureNames=False)
-        assert all(map(lambda x: x.startswith(DEFAULT_PREFIX), testObj.getFeatureNames()))
-        assert all(map(lambda x: x.startswith(DEFAULT_PREFIX), testObj.getPointNames()))
+        assert all(map(lambda x: x.startswith(DEFAULT_PREFIX), testObj.features.getNames()))
+        assert all(map(lambda x: x.startswith(DEFAULT_PREFIX), testObj.points.getNames()))
 
-        #pnames explicit False given 'point_names' at [0,0] and fname auto extraction
-        raw = "point_names,fname0,fname1,fname2\npname0,1,2,3\n"
+        #pnames explicit False given 'pointNames' at [0,0] and fname auto extraction
+        raw = "pointNames,fname0,fname1,fname2\npname0,1,2,3\n"
         testObj = helper_auto(raw, rawT, retT, pointNames=False, featureNames=True)
-        assert testObj.getFeatureNames() == ['point_names', 'fname0', 'fname1', 'fname2']
-        assert all(map(lambda x: x.startswith(DEFAULT_PREFIX), testObj.getPointNames()))
+        assert testObj.features.getNames() == ['pointNames', 'fname0', 'fname1', 'fname2']
+        assert all(map(lambda x: x.startswith(DEFAULT_PREFIX), testObj.points.getNames()))
+
+
+def test_names_AutomaticVsTrueVsFalseVsNone():
+    """ Test createData() accepted inputs for pointNames and featureNames """
+    for t in returnTypes:
+        # pNames and fNames triggered for automatic
+        raw1 = [['pointNames', 'fname0','fname1','fname2'],
+                ['pname0', 0, 1, 2]]
+        testAuto = UML.createData(t, raw1, pointNames='automatic', featureNames='automatic')
+        testTrue = UML.createData(t, raw1, pointNames=True, featureNames=True)
+        testFalse = UML.createData(t, raw1, pointNames=False, featureNames=False)
+        testNone = UML.createData(t, raw1, pointNames=None, featureNames=None)
+
+        assert testAuto == testTrue
+        assert testAuto != testFalse
+        assert testFalse == testNone
+
+        # pNames not triggered, fNames triggered for automatic
+        raw2 = [['either', 'fname0','fname1','fname2'],
+                [99, 0, 1, 2]]
+        testAuto = UML.createData(t, raw2, pointNames='automatic', featureNames='automatic')
+        testTrue = UML.createData(t, raw2, pointNames=True, featureNames=True)
+        testFalse = UML.createData(t, raw2, pointNames=False, featureNames=False)
+        testNone = UML.createData(t, raw2, pointNames=None, featureNames=None)
+
+        assert testAuto != testTrue
+        assert testAuto != testFalse
+        assert testTrue != testFalse
+        assert testFalse == testNone
+
+        # no names triggered for automatic
+        raw3 = [[-1, 9, 8, 7],
+                [99, 0, 1, 2]]
+        testAuto = UML.createData(t, raw3, pointNames='automatic', featureNames='automatic')
+        testTrue = UML.createData(t, raw3, pointNames=True, featureNames=True)
+        testFalse = UML.createData(t, raw3, pointNames=False, featureNames=False)
+        testNone = UML.createData(t, raw3, pointNames=None, featureNames=None)
+
+        assert testAuto != testTrue
+        assert testAuto == testFalse
+        assert testFalse == testNone
 
 
 def test_namesInComment_MTXArr():
@@ -587,7 +779,7 @@ def test_extractNames_MTXCoo():
             assert fromList == fromMTXCoo
 
 
-@raises(ArgumentException)
+@raises(InvalidArgumentValue)
 def test_csv_extractNames_duplicatePointName():
     # instantiate from csv file
     with tempfile.NamedTemporaryFile(suffix=".csv", mode='w') as tmpCSV:
@@ -599,7 +791,7 @@ def test_csv_extractNames_duplicatePointName():
         UML.createData(returnType="List", data=tmpCSV.name, pointNames=True)
 
 
-@raises(ArgumentException)
+@raises(InvalidArgumentValue)
 def test_csv_extractNames_duplicateFeatureName():
     # instantiate from csv file
     with tempfile.NamedTemporaryFile(suffix=".csv", mode='w') as tmpCSV:
@@ -616,7 +808,7 @@ def test_csv_roundtrip_autonames():
         data = [[1, 0, 5, 12], [0, 1, 3, 17], [0, 0, 8, 22]]
         pnames = ['p0','p1','p2']
         fnames = ['f0','f1','f2', 'f3']
-        
+
         withFnames = UML.createData(retType, data, featureNames=fnames)
         withBoth = UML.createData(retType, data, featureNames=fnames, pointNames=pnames)
 
@@ -713,15 +905,68 @@ def test_extractNames_CscSparse():
 
     for t in returnTypes:
         inDataRaw = numpy.array([[-111, 21, 22, 23], [11, 1, -1, -3]])
-        inDataRaw = scipy.sparse.coo_matrix(inDataRaw)
+        inDataRaw = scipy.sparse.csc_matrix(inDataRaw)
         specRaw = numpy.array([[1, -1, -3]])
-        specRaw = scipy.sparse.coo_matrix(specRaw)
+        specRaw = scipy.sparse.csc_matrix(specRaw)
 
         inData = UML.createData(
             returnType=t, data=inDataRaw, pointNames=True, featureNames=True)
         specified = UML.createData(
             returnType=t, data=specRaw, pointNames=pNames, featureNames=fNames)
         assert inData == specified
+
+
+def test_extractNames_pandasDataFrame():
+    pNames = ['11']
+    fNames = ['21', '22', '23']
+
+    for t in returnTypes:
+        inDataRaw = pd.DataFrame([[1, -1, -3]], index=[11], columns=[21, 22, 23])
+        specRaw = pd.DataFrame([[1, -1, -3]])
+
+        inData = UML.createData(
+            returnType=t, data=inDataRaw, pointNames=True, featureNames=True)
+        specified = UML.createData(
+            returnType=t, data=specRaw, pointNames=pNames, featureNames=fNames)
+        assert inData == specified
+
+
+def test_names_dataUnmodified():
+    """ Test original data unmodifed when names set to 'automatic' or True """
+    autoData = [['pointNames', 'fname0', 'fname1', 'fname2'], ['pt', 1, -1, -3]]
+    autoArray = numpy.array(autoData, dtype=numpy.object_)
+    trueData = [[-111, 21, 22, 23], [11, 1, -1, -3]]
+
+    def assertUnmodified(rawData, names):
+        if isinstance(rawData, list):
+            rawDataCopy = [lst.copy() for lst in rawData]
+        else:
+            rawDataCopy = rawData.copy()
+        inData = UML.createData(
+            returnType=t, data=rawData, pointNames=names, featureNames=names)
+
+        if isinstance(rawData, list):
+            rawData == rawDataCopy
+        elif scipy.sparse.isspmatrix(rawData):
+            numpy.testing.assert_array_equal(rawData.todense(), rawDataCopy.todense())
+        else:
+            numpy.testing.assert_array_equal(rawData, rawDataCopy)
+
+
+    for t in returnTypes:
+        assertUnmodified(autoData, 'automatic')
+        assertUnmodified(trueData, True)
+        assertUnmodified(autoArray, 'automatic')
+        assertUnmodified(numpy.array(trueData), True)
+        assertUnmodified(numpy.matrix(autoArray), 'automatic')
+        assertUnmodified(numpy.matrix(trueData), True)
+        assertUnmodified(scipy.sparse.coo_matrix(autoArray), 'automatic')
+        assertUnmodified(scipy.sparse.coo_matrix(trueData), True)
+        assertUnmodified(pd.DataFrame([[1, -1, -3]], index=['pt'],
+                                      columns=['fname0', 'fname1', 'fname2']),
+                         'automatic')
+        assertUnmodified(pd.DataFrame([[1, -1, -3]], index=[11], columns=[21, 22, 23]),
+                         True)
 
 
 ###############################
@@ -764,7 +1009,7 @@ def test_createData_CSV_passedOpen():
             openFile = open(openFile.name, 'rU')
             namelessOpenFile = NamelessFile(openFile)
             fromCSV = UML.createData(
-                returnType=t, data=namelessOpenFile, fileType='csv')
+                returnType=t, data=namelessOpenFile)
             assert fromCSV.name.startswith(UML.data.dataHelpers.DEFAULT_NAME_PREFIX)
             assert fromCSV.path is None
             assert fromCSV.absolutePath is None
@@ -800,7 +1045,7 @@ def test_createData_MTXArr_passedOpen():
             openFile = open(tmpMTXArr.name, 'rU')
             namelessOpenFile = NamelessFile(openFile)
             fromMTXArr = UML.createData(
-                returnType=t, data=namelessOpenFile, fileType='mtx')
+                returnType=t, data=namelessOpenFile)
             assert fromMTXArr.name.startswith(
                 UML.data.dataHelpers.DEFAULT_NAME_PREFIX)
             assert fromMTXArr.path is None
@@ -837,13 +1082,156 @@ def test_createData_MTXCoo_passedOpen():
             openFile = open(tmpMTXCoo.name, 'rU')
             namelessOpenFile = NamelessFile(openFile)
             fromMTXCoo = UML.createData(
-                returnType=t, data=namelessOpenFile, fileType='mtx')
+                returnType=t, data=namelessOpenFile)
             assert fromMTXCoo.name.startswith(
                 UML.data.dataHelpers.DEFAULT_NAME_PREFIX)
             assert fromMTXCoo.path is None
             assert fromMTXCoo.absolutePath is None
             assert fromMTXCoo.relativePath is None
 
+###########################
+# url as a source of data #
+###########################
+
+def mocked_requests_get(*args, **kwargs):
+    class MockResponse:
+        """mock of Response object returned by a call to requests.get"""
+        def __init__(self, content, status_code, ok=True, reason=None, encoding='utf-8'):
+            # In Response object, .content returns bytes and .text returns unicode
+            # python2 uses .content and python3 uses .text in the code, so setting
+            # self.content and self.text to content replicates the desired behavior
+            self.content = content
+            self.text = content
+            self.status_code = status_code
+            self.ok = ok
+            self.reason = reason
+            self.apparent_encoding = encoding
+
+    if args[0] == 'http://mockrequests.uml/CSVNoExtension':
+        return MockResponse('1,2,3\n4,5,6', 200)
+    elif args[0] == 'http://mockrequests.uml/CSVAmbiguousExtension.data':
+        return MockResponse('1,2,3\n4,5,6', 200)
+    elif args[0] == 'http://mockrequests.uml/CSV.csv':
+        return MockResponse('1,2,3\n4,5,6', 200)
+    elif args[0] == 'http://mockrequests.uml/CSVcarriagereturn.csv':
+        return MockResponse('1,2,3\r4,5,6', 200)
+    elif args[0] == 'http://mockrequests.uml/CSVunicodetest.csv':
+        return MockResponse('1,2,\xc2\xa1\n4,5,6', 200)
+    elif args[0] == 'http://mockrequests.uml/CSVquotednewline.csv':
+        # csv allows for newline characters in field values within double quotes
+        return MockResponse('1,2,"a/nb"\n4,5,6', 200)
+    elif (args[0] == 'http://mockrequests.uml/MTXNoExtension' or
+          args[0] == 'http://mockrequests.uml/MTXAmbiguousExtension.data' or
+          args[0] == 'http://mockrequests.uml/MTX.mtx'):
+        mtx = '%%MatrixMarket matrix coordinate real general\n2 3 6\n1 1 1\n1 2 2\n1 3 3\n2 1 4\n2 2 5\n2 3 6'
+        return MockResponse(mtx, 200)
+
+    return MockResponse(None, 404, False, 'Not Found')
+
+@mock.patch('requests.get', side_effect=mocked_requests_get)
+def test_createData_http_CSVNoExtension(mock_get):
+    for t in returnTypes:
+        exp = UML.createData(returnType=t, data=[[1,2,3],[4,5,6]])
+        url = 'http://mockrequests.uml/CSVNoExtension'
+        fromWeb = UML.createData(returnType=t, data=url)
+        assert fromWeb == exp
+
+@mock.patch('requests.get', side_effect=mocked_requests_get)
+def test_createData_http_CSVAmbiguousExtension(mock_get):
+    for t in returnTypes:
+        exp = UML.createData(returnType=t, data=[[1,2,3],[4,5,6]])
+        url = 'http://mockrequests.uml/CSVAmbiguousExtension.data'
+        fromWeb = UML.createData(returnType=t, data=url)
+        assert fromWeb == exp
+
+@mock.patch('requests.get', side_effect=mocked_requests_get)
+def test_createData_http_CSVFileOK(mock_get):
+    for t in returnTypes:
+        exp = UML.createData(returnType=t, data=[[1,2,3],[4,5,6]])
+        url = 'http://mockrequests.uml/CSV.csv'
+        fromWeb = UML.createData(returnType=t, data=url)
+        assert fromWeb == exp
+
+@mock.patch('requests.get', side_effect=mocked_requests_get)
+def test_createData_http_CSVCarriageReturn(mock_get):
+    for t in returnTypes:
+        exp = UML.createData(returnType=t, data=[[1,2,3],[4,5,6]])
+        url = 'http://mockrequests.uml/CSVcarriagereturn.csv'
+        fromWeb = UML.createData(returnType=t, data=url)
+        assert fromWeb == exp
+
+@mock.patch('requests.get', side_effect=mocked_requests_get)
+def test_createData_http_CSVNonUnicodeValues(mock_get):
+    for t in returnTypes:
+        exp = UML.createData(returnType=t, data=[[1,2,'\xc2\xa1'],[4,5,6]])
+        url = 'http://mockrequests.uml/CSVunicodetest.csv'
+        fromWeb = UML.createData(returnType=t, data=url)
+        assert fromWeb == exp
+
+@mock.patch('requests.get', side_effect=mocked_requests_get)
+def test_createData_http_CSVQuotedNewLine(mock_get):
+    for t in returnTypes:
+        exp = UML.createData(returnType=t, data=[[1,2,"a/nb"],[4,5,6]])
+        url = 'http://mockrequests.uml/CSVquotednewline.csv'
+        fromWeb = UML.createData(returnType=t, data=url)
+        assert fromWeb == exp
+
+@mock.patch('requests.get', side_effect=mocked_requests_get)
+def test_createData_http_CSVPathsEqualUrl(mock_get):
+    for t in returnTypes:
+        exp = UML.createData(returnType=t, data=[[1,2,3],[4,5,6]])
+        url = 'http://mockrequests.uml/CSVNoExtension'
+        fromWeb = UML.createData(returnType=t, data=url)
+        assert fromWeb.absolutePath == url
+        assert fromWeb.relativePath == None
+
+@mock.patch('requests.get', side_effect=mocked_requests_get)
+def test_createData_http_MTXNoExtension(mock_get):
+    for t in returnTypes:
+        # None returnType for url will default to Sparse so use coo_matrix for data
+        data = scipy.sparse.coo_matrix([[1,2,3],[4,5,6]])
+        exp = UML.createData(returnType=t, data=data)
+        url = 'http://mockrequests.uml/MTXNoExtension'
+        fromWeb = UML.createData(returnType=t, data=url)
+        assert fromWeb == exp
+
+@mock.patch('requests.get', side_effect=mocked_requests_get)
+def test_createData_http_MTXAmbiguousExtension(mock_get):
+    for t in returnTypes:
+        # None returnType for url will default to Sparse so use coo_matrix for data
+        data = scipy.sparse.coo_matrix([[1,2,3],[4,5,6]])
+        exp = UML.createData(returnType=t, data=data)
+        url = 'http://mockrequests.uml/MTXAmbiguousExtension.data'
+        fromWeb = UML.createData(returnType=t, data=url)
+        assert fromWeb == exp
+
+@mock.patch('requests.get', side_effect=mocked_requests_get)
+def test_createData_http_MTXFileOK(mock_get):
+    for t in returnTypes:
+        # None returnType for url will default to Sparse so use coo_matrix for data
+        data = scipy.sparse.coo_matrix([[1,2,3],[4,5,6]])
+        exp = UML.createData(returnType=t, data=data)
+        url = 'http://mockrequests.uml/MTX.mtx'
+        fromWeb = UML.createData(returnType=t, data=url)
+        assert fromWeb == exp
+
+@mock.patch('requests.get', side_effect=mocked_requests_get)
+def test_createData_http_MTXPathsEqualUrl(mock_get):
+    for t in returnTypes:
+        # None returnType for url will default to Sparse so use coo_matrix for data
+        data = scipy.sparse.coo_matrix([[1,2,3],[4,5,6]])
+        exp = UML.createData(returnType=t, data=data)
+        url = 'http://mockrequests.uml/MTXNoExtension'
+        fromWeb = UML.createData(returnType=t, data=url)
+        assert fromWeb.absolutePath == url
+        assert fromWeb.relativePath == None
+
+@raises(InvalidArgumentValue)
+@mock.patch('requests.get', side_effect=mocked_requests_get)
+def test_createData_http_linkError(mock_get):
+    for t in returnTypes:
+        url = 'http://mockrequests.uml/linknotfound.csv'
+        fromWeb = UML.createData(returnType=t, data=url)
 
 ###################################
 # ignoreNonNumericalFeatures flag #
@@ -866,7 +1254,7 @@ def test_createData_ignoreNonNumericalFeaturesCSV():
 
             # sanity check
             fromCSV = UML.createData(returnType=t, data=tmpCSV.name)
-            assert fromCSV.features == 4
+            assert len(fromCSV.features) == 4
 
 
 def test_createData_CSV_ignoreNonNumerical_removalCleanup_hard():
@@ -888,7 +1276,7 @@ def test_createData_CSV_ignoreNonNumerical_removalCleanup_hard():
 
             # sanity check
             fromCSV = UML.createData(returnType=t, data=tmpCSV.name)
-            assert fromCSV.features == 5
+            assert len(fromCSV.features) == 5
 
 
 def test_createData_CSV_ignoreNonNumerical_removalCleanup_easy():
@@ -910,7 +1298,7 @@ def test_createData_CSV_ignoreNonNumerical_removalCleanup_easy():
 
             # sanity check
             fromCSV = UML.createData(returnType=t, data=tmpCSV.name)
-            assert fromCSV.features == 5
+            assert len(fromCSV.features) == 5
 
 
 def test_createData_ignoreNonNumericalFeaturesCSV_noEffect():
@@ -929,7 +1317,7 @@ def test_createData_ignoreNonNumericalFeaturesCSV_noEffect():
             assert fromList == fromCSV
 
             fromCSV = UML.createData(returnType=t, data=tmpCSV.name)
-            assert fromCSV.features == 4
+            assert len(fromCSV.features) == 4
 
 
 def test_CSV_ignoreNonNumericalFeatures_featureNamesDontTrigger():
@@ -1083,7 +1471,7 @@ def test_createData_keepPF_AllPossibleNatOrder():
         data = [[1, 2, 3], [11, 22, 33], [111, 222, 333]]
         orig = UML.createData(returnType=t, data=data)
         with tempfile.NamedTemporaryFile(suffix="." + f) as tmpF:
-            orig.writeFile(tmpF.name, format=f, includeNames=False)
+            orig.writeFile(tmpF.name, fileFormat=f, includeNames=False)
             tmpF.flush()
 
             poss = [[0], [1], [2], [0, 1], [0, 2], [1, 2], [0, 1, 2], 'all']
@@ -1102,7 +1490,7 @@ def test_createData_keepPF_AllPossibleReverseOrder():
         data = [[1, 2, 3], [11, 22, 33], [111, 222, 333]]
         orig = UML.createData(returnType=t, data=data)
         with tempfile.NamedTemporaryFile(suffix="." + f) as tmpF:
-            orig.writeFile(tmpF.name, format=f, includeNames=False)
+            orig.writeFile(tmpF.name, fileFormat=f, includeNames=False)
             tmpF.flush()
 
             poss = [[0, 1], [0, 2], [1, 2], [0, 1, 2]]
@@ -1135,13 +1523,12 @@ def test_createData_keepPF_AllPossibleWithNames_extracted():
     filesForms = ['csv', 'mtx']
     for (t, f) in itertools.product(returnTypes, filesForms):
         with tempfile.NamedTemporaryFile(suffix="." + f) as tmpF:
-            orig.writeFile(
-                tmpF.name, format=f, includeNames=False)
+            orig.writeFile(tmpF.name, fileFormat=f, includeNames=False)
             tmpF.flush()
 
             poss = [[0], [1], [0, 1], [1, 0], 'all']
             for (pSel, fSel) in itertools.product(poss, poss):
-                toUse = orig.copyAs("pythonlist")
+                toUse = orig.copy(to="pythonlist")
                 fromOrig = UML.createData(
                     t, toUse, keepPoints=pSel, keepFeatures=fSel,
                     pointNames=True, featureNames=True)
@@ -1154,11 +1541,11 @@ def test_createData_keepPF_AllPossibleWithNames_extracted():
                 fSelUse = copy.copy(fSel)
                 if pSel != 'all':
                     for i in range(len(pSel)):
-                        pSelUse[i] = ret.getPointName(i)
+                        pSelUse[i] = ret.points.getName(i)
 
                 if fSel != 'all':
                     for i in range(len(fSel)):
-                        fSelUse[i] = ret.getFeatureName(i)
+                        fSelUse[i] = ret.features.getName(i)
 
                 retN = UML.createData(
                     t, tmpF.name, keepPoints=pSelUse,
@@ -1179,13 +1566,12 @@ def test_createData_keepPF_AllPossibleWithNames_listProvided():
     filesForms = ['csv', 'mtx']
     for (t, f) in itertools.product(returnTypes, filesForms):
         with tempfile.NamedTemporaryFile(suffix="." + f) as tmpF:
-            orig.writeFile(
-                tmpF.name, format=f, includeNames=False)
+            orig.writeFile(tmpF.name, fileFormat=f, includeNames=False)
             tmpF.flush()
 
             poss = [[0], [1], [0, 1], [1, 0], 'all']
             for (pSel, fSel) in itertools.product(poss, poss):
-                toUseData = orig.copyAs("pythonlist")
+                toUseData = orig.copy(to="pythonlist")
 
                 fromOrig = UML.createData(
                     t, toUseData, keepPoints=pSel, keepFeatures=fSel,
@@ -1199,11 +1585,11 @@ def test_createData_keepPF_AllPossibleWithNames_listProvided():
                 fSelUse = copy.copy(fSel)
                 if pSel != 'all':
                     for i in range(len(pSel)):
-                        pSelUse[i] = ret.getPointName(i)
+                        pSelUse[i] = ret.points.getName(i)
 
                 if fSel != 'all':
                     for i in range(len(fSel)):
-                        fSelUse[i] = ret.getFeatureName(i)
+                        fSelUse[i] = ret.features.getName(i)
 
                 retN = UML.createData(
                     t, tmpF.name, keepPoints=pSelUse,
@@ -1224,13 +1610,12 @@ def test_createData_keepPF_AllPossibleWithNames_dictProvided():
     filesForms = ['csv', 'mtx']
     for (t, f) in itertools.product(returnTypes, filesForms):
         with tempfile.NamedTemporaryFile(suffix="." + f) as tmpF:
-            orig.writeFile(
-                tmpF.name, format=f, includeNames=False)
+            orig.writeFile(tmpF.name, fileFormat=f, includeNames=False)
             tmpF.flush()
 
             poss = [[0], [1], [0, 1], [1, 0], 'all']
             for (pSel, fSel) in itertools.product(poss, poss):
-                toUseData = orig.copyAs("pythonlist")
+                toUseData = orig.copy(to="pythonlist")
 
                 fromOrig = UML.createData(
                     t, toUseData, keepPoints=pSel, keepFeatures=fSel,
@@ -1244,11 +1629,11 @@ def test_createData_keepPF_AllPossibleWithNames_dictProvided():
                 fSelUse = copy.copy(fSel)
                 if pSel != 'all':
                     for i in range(len(pSel)):
-                        pSelUse[i] = ret.getPointName(i)
+                        pSelUse[i] = ret.points.getName(i)
 
                 if fSel != 'all':
                     for i in range(len(fSel)):
-                        fSelUse[i] = ret.getFeatureName(i)
+                        fSelUse[i] = ret.features.getName(i)
 
                 retN = UML.createData(
                     t, tmpF.name, keepPoints=pSelUse,
@@ -1295,7 +1680,8 @@ def test_createData_keepPF_csv_noUncessaryStorage():
     try:
         def fakeinitDataObject(
                 returnType, rawData, pointNames, featureNames, name, path,
-                keepPoints, keepFeatures):
+                keepPoints, keepFeatures, treatAsMissing, replaceMissingWith,
+                reuseData=False):
             assert len(rawData) == 2
             assert len(rawData[0]) == 1
             return UML.data.List(rawData)
@@ -1507,7 +1893,7 @@ def test_createData_keepPF_spCsc_simple():
     assert fromCSC == wanted
 
 
-@raises(ArgumentException)
+@raises(InvalidArgumentValue)
 def test_keepPF_csv_ExceptionUnknownFeatureName_Extracted():
     # instantiate from csv file
     with tempfile.NamedTemporaryFile(suffix=".csv", mode='w') as tmpCSV:
@@ -1522,7 +1908,7 @@ def test_keepPF_csv_ExceptionUnknownFeatureName_Extracted():
             featureNames=True, keepFeatures=[0, "fours"])
 
 
-@raises(ArgumentException)
+@raises(InvalidArgumentValue)
 def test_keepPF_csv_ExceptionUnknownFeatureName_Provided():
     # instantiate from csv file
     with tempfile.NamedTemporaryFile(suffix=".csv", mode='w') as tmpCSV:
@@ -1536,7 +1922,7 @@ def test_keepPF_csv_ExceptionUnknownFeatureName_Provided():
             featureNames=['ones', 'twos', 'threes'], keepFeatures=[0, "fours"])
 
 
-@raises(ArgumentException)
+@raises(InvalidArgumentValue)
 def test_csv_keepFeatures_indexNotInFile():
     with tempfile.NamedTemporaryFile(suffix=".csv", mode='w') as tmpCSV:
         tmpCSV.write("pns,ones,twos,threes\n")
@@ -1550,7 +1936,7 @@ def test_csv_keepFeatures_indexNotInFile():
             featureNames=False, keepPoints=[1, 2], keepFeatures=[1, 42])
 
 
-@raises(ArgumentException)
+@raises(InvalidArgumentValue)
 def test_csv_keepPoints_indexNotInFile():
     with tempfile.NamedTemporaryFile(suffix=".csv", mode='w') as tmpCSV:
         tmpCSV.write("pns,ones,twos,threes\n")
@@ -1564,7 +1950,7 @@ def test_csv_keepPoints_indexNotInFile():
             featureNames=False, keepPoints=[12, 2, 3], keepFeatures=[1, 2])
 
 
-@raises(ArgumentException)
+@raises(InvalidArgumentValue)
 def test_keepPF_csv_ExceptionUnknownPointName_extracted():
     # instantiate from csv file
     with tempfile.NamedTemporaryFile(suffix=".csv", mode='w') as tmpCSV:
@@ -1579,7 +1965,7 @@ def test_keepPF_csv_ExceptionUnknownPointName_extracted():
             featureNames=True, keepPoints=[1, "quads"])
 
 
-@raises(ArgumentException)
+@raises(InvalidArgumentValue)
 def test_keepPF_csv_ExceptionUnknownPointName_provided():
     # instantiate from csv file
     with tempfile.NamedTemporaryFile(suffix=".csv", mode='w') as tmpCSV:
@@ -1593,7 +1979,7 @@ def test_keepPF_csv_ExceptionUnknownPointName_provided():
             pointNames=['single', 'dubs', 'trips'], keepPoints=[1, "quads"])
 
 
-@raises(ArgumentException)
+@raises(InvalidArgumentValue)
 def test_csv_keepPoints_noNamesButNameSpecified():
     with tempfile.NamedTemporaryFile(suffix=".csv", mode='w') as tmpCSV:
         tmpCSV.write("pns,ones,twos,threes\n")
@@ -1607,7 +1993,7 @@ def test_csv_keepPoints_noNamesButNameSpecified():
             featureNames=False, keepPoints=['dubs', 1], keepFeatures=[2])
 
 
-@raises(ArgumentException)
+@raises(InvalidArgumentValue)
 def test_csv_keepFeatures_noNamesButNameSpecified():
     with tempfile.NamedTemporaryFile(suffix=".csv", mode='w') as tmpCSV:
         tmpCSV.write("pns,ones,twos,threes\n")
@@ -1634,28 +2020,28 @@ def test_csv_keepFeatures_duplicatesInList():
                 returnType='List', data=tmpCSV.name, pointNames=True,
                 featureNames=True, keepFeatures=[1, 1])
             assert False
-        except ArgumentException:
+        except InvalidArgumentValue:
             pass
         try:
             UML.createData(
                 returnType='List', data=tmpCSV.name, pointNames=True,
                 featureNames=True, keepFeatures=[1, 'twos'])
             assert False
-        except ArgumentException:
+        except InvalidArgumentValue:
             pass
         try:
             UML.createData(
                 returnType='List', data=tmpCSV.name, pointNames=True,
                 featureNames=True, keepFeatures=['threes', 'threes'])
             assert False
-        except ArgumentException:
+        except InvalidArgumentValue:
             pass
         try:
             UML.createData(
                 returnType='List', data=tmpCSV.name, pointNames=True,
                 featureNames=['ones', 'twos', 'threes'], keepFeatures=[1, 'twos'])
             assert False
-        except ArgumentException:
+        except InvalidArgumentValue:
             pass
         try:
             UML.createData(
@@ -1663,7 +2049,7 @@ def test_csv_keepFeatures_duplicatesInList():
                 featureNames=['ones', 'twos', 'threes'],
                 keepFeatures=['threes', 'threes'])
             assert False
-        except ArgumentException:
+        except InvalidArgumentValue:
             pass
 
 
@@ -1680,21 +2066,21 @@ def test_csv_keepPoints_duplicatesInList():
                 returnType='List', data=tmpCSV.name, pointNames=True,
                 featureNames=True, keepPoints=[1, 1])
             assert False
-        except ArgumentException:
+        except InvalidArgumentValue:
             pass
         try:
             UML.createData(
                 returnType='List', data=tmpCSV.name, pointNames=True,
                 featureNames=True, keepPoints=[1, 'dubs'])
             assert False
-        except ArgumentException:
+        except InvalidArgumentValue:
             pass
         try:
             UML.createData(
                 returnType='List', data=tmpCSV.name, pointNames=True,
                 featureNames=True, keepPoints=['trips', 'trips'])
             assert False
-        except ArgumentException:
+        except InvalidArgumentValue:
             pass
         try:
             UML.createData(
@@ -1702,7 +2088,7 @@ def test_csv_keepPoints_duplicatesInList():
                 pointNames=['single', 'dubs', 'trips'], featureNames=True,
                 keepPoints=[1, 'dubs'])
             assert False
-        except ArgumentException:
+        except InvalidArgumentValue:
             pass
         try:
             UML.createData(
@@ -1710,7 +2096,7 @@ def test_csv_keepPoints_duplicatesInList():
                 pointNames=['single', 'dubs', 'trips'], featureNames=True,
                 keepPoints=['trips', 'trips'])
             assert False
-        except ArgumentException:
+        except InvalidArgumentValue:
             pass
 
 
@@ -1752,6 +2138,211 @@ def test_createData_keepPoints_csv_endAfterAllFound():
         fromCSV = UML.createData("Matrix", data=tmpCSV.name, keepPoints=[1, 0])
         assert fromCSV == wanted
 
+######################
+### inputSeparator ###
+######################
+
+def test_createData_csv_inputSeparatorAutomatic():
+    wanted = UML.createData("Matrix", data=[[1,2,3], [4,5,6]])
+    # instantiate from csv file
+    for delimiter in [',', '\t', ' ', ':', ';', '|']:
+        with tempfile.NamedTemporaryFile(mode='w') as tmpCSV:
+            tmpCSV.write("1{0}2{0}3\n".format(delimiter))
+            tmpCSV.write("4{0}5{0}6\n".format(delimiter))
+            tmpCSV.flush()
+
+            fromCSV = UML.createData("Matrix", data=tmpCSV.name)
+            assert fromCSV == wanted
+
+def test_createData_csv_inputSeparatorSpecified():
+    wanted = UML.createData("Matrix", data=[[1,2,3], [4,5,6]])
+    # instantiate from csv file
+    for delimiter in [',', '\t', ' ', ':', ';', '|']:
+        with tempfile.NamedTemporaryFile(mode='w') as tmpCSV:
+            tmpCSV.write("1{0}2{0}3\n".format(delimiter))
+            tmpCSV.write("4{0}5{0}6\n".format(delimiter))
+            tmpCSV.flush()
+
+            fromCSV = UML.createData("Matrix", data=tmpCSV.name, inputSeparator=delimiter)
+            assert fromCSV == wanted
+
+@raises(FileFormatException)
+def test_createData_csv_inputSeparatorConfusion():
+    with tempfile.NamedTemporaryFile(mode='w') as tmpCSV:
+        tmpCSV.write("1,2;3\n")
+        tmpCSV.write("4,5,6\n")
+        tmpCSV.flush()
+
+        fromCSV = UML.createData("Matrix", data=tmpCSV.name)
+
+@raises(InvalidArgumentValue)
+def test_createData_csv_inputSeparatorNot1Character():
+    with tempfile.NamedTemporaryFile(mode='w') as tmpCSV:
+        tmpCSV.write("1,,2,,3\n")
+        tmpCSV.write("4,,5,,6\n")
+        tmpCSV.flush()
+
+        fromCSV = UML.createData("Matrix", data=tmpCSV.name, inputSeparator=',,')
+
+
+#########################################
+# treatAsMissing and replaceMissingWith #
+#########################################
+
+def test_missingDefaults():
+    for t in returnTypes:
+        nan = numpy.nan
+        data = [[1, 2, float('nan')], [numpy.nan, 5, 6], [7, None, 9], ["", "nan", "None"]]
+        toTest = UML.createData(t, data)
+        expData = [[1, 2, nan], [nan, 5, 6], [7, nan, 9], [nan, nan, nan]]
+        expRet = UML.createData(t, expData)
+        assert toTest == expRet
+
+def test_handmadeReplaceMissingWith():
+    for t in returnTypes:
+        data = [[1, 2, float('nan')], [numpy.nan, 5, 6], [7, None, 9], ["", "nan", "None"]]
+        toTest = UML.createData(t, data, replaceMissingWith=0)
+        expData = [[1, 2, 0], [0, 5, 6], [7, 0, 9], [0, 0, 0]]
+        expRet = UML.createData(t, expData)
+        assert toTest == expRet
+
+def test_numericalReplaceMissingWithNonNumeric():
+    for t in returnTypes:
+        data = [[1, 2, None], [None, 5, 6], [7, None, 9], [None, None, None]]
+        toTest = UML.createData(t, data, replaceMissingWith="Missing")
+        expData = [[1, 2, "Missing"], ["Missing", 5, 6], [7, "Missing", 9], ["Missing", "Missing", "Missing"]]
+        expRet = UML.createData(t, expData)
+        assert toTest == expRet
+
+def test_handmadeTreatAsMissing():
+    for t in returnTypes:
+        nan = numpy.nan
+        data = [[1, 2, ""], [numpy.nan, 5, 6], [7, None, 9], ["", "nan", "None"]]
+        toTest = UML.createData(t, data, treatAsMissing=[numpy.nan, None, ""])
+        expData = [[1, 2, nan], [nan, 5, 6], [7, nan, 9], [nan, "nan", "None"]]
+        expRet = UML.createData(t, expData, treatAsMissing=None)
+        assert toTest == expRet
+
+def test_handmadeConsiderAndReplaceMissingWith():
+    for t in returnTypes:
+        data = [[1, 2, "NA"], ["NA", 5, 6], [7, "NA", 9], ["NA", "NA", "NA"]]
+        toTest = UML.createData(t, data, treatAsMissing=["NA"], replaceMissingWith=0)
+        expData = [[1, 2, 0], [0, 5, 6], [7, 0, 9], [0, 0, 0]]
+        expRet = UML.createData(t, expData)
+        assert toTest == expRet
+
+def test_replaceDataTypeMismatch():
+    for t in returnTypes:
+        data = [[1, 2, 99], [99, 5, 6], [7, 99, 9], [99, 99, 99]]
+        toTest = UML.createData(t, data, treatAsMissing=[99], replaceMissingWith="")
+        expData = [[1, 2, ""], ["", 5, 6], [7, "", 9], ["", "", ""]]
+        expRet = UML.createData(t, expData, treatAsMissing=None)
+        assert toTest == expRet
+
+def test_keepNanAndReplaceAlternateMissing():
+    for t in returnTypes:
+        nan = numpy.nan
+        data = [[1, 2, "NA"], [numpy.nan, 5, 6], [7, "NA", 9], ["NA", numpy.nan, "NA"]]
+        toTest = UML.createData(t, data, treatAsMissing=["NA"], replaceMissingWith=-1)
+        expData = [[1, 2, -1], [nan, 5, 6], [7, -1, 9], [-1, nan, -1]]
+        expRet = UML.createData(t, expData, treatAsMissing=None)
+        assert toTest == expRet
+
+def test_treatAsMissingIsNone():
+    for t in returnTypes:
+        nan = numpy.nan
+        data = [[1, 2, None], [None, 5, 6], [7, None, 9], ["", numpy.nan, ""]]
+        toTest = UML.createData(t, data, treatAsMissing=None)
+        notExpData = [[1,2, nan], [nan, 5, 6], [7, nan, 9], [nan, nan, nan]]
+        notExpRet = UML.createData(t, notExpData, treatAsMissing=None, elementType=object)
+        assert toTest != notExpRet
+
+def test_DataOutputWithMissingDataTypes1D():
+    for t in returnTypes:
+        nan = numpy.nan
+        expListOutput = [[1.0, 2.0, nan]]
+        expMatrixOutput = numpy.matrix(expListOutput)
+        expDataFrameOutput = pd.DataFrame(expListOutput)
+        expSparseOutput = scipy.sparse.coo_matrix(expListOutput)
+
+        orig1 = UML.createData(t, [1,2,"None"])
+        orig2 = UML.createData(t, (1,2,"None"))
+        orig3 = UML.createData(t, {'a':1, 'b':2, 'c':"None"})
+        orig3.features.sort(sortBy=orig3.points.getName(0))
+        orig4 = UML.createData(t, [{'a':1, 'b':2, 'c':"None"}])
+        orig4.features.sort(sortBy=orig4.points.getName(0))
+        orig5 = UML.createData(t, numpy.array([1,2,"None"]))
+        orig6 = UML.createData(t, numpy.matrix([1,2,"None"]))
+        if pd:
+            orig7 = UML.createData(t, pd.DataFrame([[1,2,"None"]]))
+            orig8 = UML.createData(t, pd.Series([1,2,"None"]))
+            orig9 = UML.createData(t, pd.SparseDataFrame([[1,2,"None"]]))
+        if scipy:
+            orig10 = UML.createData(t, scipy.sparse.coo_matrix(numpy.array([1,2,"None"], dtype=object)))
+            orig11 = UML.createData(t, scipy.sparse.csc_matrix(numpy.array([1,2,float('nan')])))
+            orig12 = UML.createData(t, scipy.sparse.csr_matrix(numpy.array([1,2,float('nan')])))
+
+        originals = [orig1, orig2, orig3, orig4, orig5, orig6, orig7, orig8, orig9, orig10, orig11, orig12]
+
+        for orig in originals:
+            if orig.getTypeString() == "List":
+                assert orig.data[0][0] == expListOutput[0][0]
+                assert orig.data[0][1] == expListOutput[0][1]
+                assert numpy.isnan(orig.data[0][2])
+            elif orig.getTypeString() == "Matrix":
+                assert numpy.array_equal(orig.data[0, :2], expMatrixOutput[0, :2])
+                assert numpy.isnan(orig.data[0, 2])
+            elif orig.getTypeString() == "DataFrame":
+                assert numpy.array_equal(orig.data.values[0, :2], expDataFrameOutput.values[0, :2])
+                assert numpy.isnan(orig.data.values[0, 2])
+            else:
+                orig._sortInternal('point')
+                assert numpy.array_equal(orig.data.data[:2], expSparseOutput.data[:2])
+                assert numpy.isnan(orig.data.data[2])
+
+def test_DataOutputWithMissingDataTypes2D():
+    for t in returnTypes:
+        nan = numpy.nan
+        expListOutput = [[1, 2, nan], [3,4,'b']]
+        expMatrixOutput = numpy.matrix(expListOutput, dtype=object)
+        expDataFrameOutput = pd.DataFrame(expMatrixOutput)
+        expSparseOutput = scipy.sparse.coo_matrix(expMatrixOutput)
+
+        orig1 = UML.createData(t, [[1,2,'None'], [3,4,'b']])
+        orig2 = UML.createData(t, ((1,2,'None'), (3,4,'b')))
+        orig3 = UML.createData(t, {'a':[1,3], 'b':[2,4], 'c':['None', 'b']}, elementType=object)
+        orig3.features.sort(sortBy=orig3.points.getName(0))
+        orig4 = UML.createData(t, [{'a':1, 'b':2, 'c':'None'}, {'a':3, 'b':4, 'c':'b'}], elementType=object)
+        orig4.features.sort(sortBy=orig4.points.getName(0))
+        orig5 = UML.createData(t, numpy.array([[1,2,'None'], [3,4,'b']], dtype=object))
+        orig6 = UML.createData(t, numpy.matrix([[1,2,'None'], [3,4,'b']], dtype=object))
+        if pd:
+            orig7 = UML.createData(t, pd.DataFrame([[1,2,'None'], [3,4,'b']]))
+            orig8 = UML.createData(t, pd.SparseDataFrame([[1,2,'None'], [3,4,'b']]))
+        if scipy:
+            orig9 = UML.createData(t, scipy.sparse.coo_matrix(numpy.array([[1,2,'None'], [3,4,'b']], dtype=object)))
+
+        originals = [orig1, orig2, orig3, orig4, orig5, orig6, orig7, orig8, orig9]
+        for orig in originals:
+            if orig.getTypeString() == "List":
+                assert orig.data[0][0] == expListOutput[0][0]
+                assert orig.data[0][1] == expListOutput[0][1]
+                assert numpy.isnan(orig.data[0][2])
+                assert orig.data[1] == expListOutput[1]
+            elif orig.getTypeString() == "Matrix":
+                assert numpy.array_equal(orig.data[0, :2], expMatrixOutput[0, :2])
+                assert numpy.isnan(orig.data[0, 2])
+                assert numpy.array_equal(orig.data[1,:], expMatrixOutput[1,:])
+            elif orig.getTypeString() == "DataFrame":
+                assert numpy.array_equal(orig.data.values[0, :2], expDataFrameOutput.values[0, :2])
+                assert numpy.isnan(orig.data.values[0, 2])
+                assert numpy.array_equal(orig.data.values[1,:], expDataFrameOutput.values[1,:])
+            else:
+                orig._sortInternal('point')
+                assert numpy.array_equal(orig.data.data[:2], expSparseOutput.data[:2])
+                assert numpy.isnan(orig.data.data[2])
+                assert numpy.array_equal(orig.data.data[3:], expSparseOutput.data[3:])
+
 
 ###################
 ### Other tests ###
@@ -1782,17 +2373,26 @@ def test_createData_csv_nonremoval_efficiency():
                 UML.helpers._removalCleanupAndSelectionOrdering = backup
 
 
+#################
+# Logging count #
+#################
+def test_createData_logCount():
+    """Test createData adds one entry to the log for each return type"""
+
+    @oneLogEntryExpected
+    def byType(rType):
+        toTest = UML.createData(rType, [[1,2,3], [4,5,6], [7,8,9]])
+
+    for t in returnTypes:
+        byType(t)
+
+
 # tests for combination of one name set being specified and one set being
 # in data.
 
 
 # test that if both in comment and specified names are present, the
 # specified names win out.
-
-
-
-# test fileType parameter : overide from extension, or no
-# extension data
 
 
 # unit tests demonstrating our file loaders can handle arbitrarly placed blank lines

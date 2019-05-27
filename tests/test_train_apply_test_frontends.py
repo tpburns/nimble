@@ -1,24 +1,106 @@
 from __future__ import absolute_import
-from nose.tools import raises
 import sys
+from unittest import mock
+
+import six
+from six.moves import range
+from nose.tools import raises
 
 import UML
-
 from UML import createData
 from UML import train
 from UML import trainAndApply
 from UML import trainAndTest
-
 from UML.calculate import fractionIncorrect
 from UML.randomness import pythonRandom
-from UML.exceptions import ArgumentException
-import six
-from six.moves import range
+from UML.exceptions import InvalidArgumentValue
+from UML.exceptions import InvalidArgumentValueCombination
+from .assertionHelpers import logCountAssertionFactory, oneLogEntryExpected
 
+def test_trainAndApply_dataInputs():
+    variables = ["x1", "x2", "x3", "label"]
+    numPoints = 20
+    data = [[pythonRandom.random(), pythonRandom.random(), pythonRandom.random(), int(pythonRandom.random() * 3) + 1]
+             for _ in range(numPoints)]
+    trainObj = createData('Matrix', data=data, featureNames=variables)
+    trainObjData = trainObj[:, :2]
+    trainObjLabels = trainObj[:, 3]
 
+    testData = [[1, 0, 0, 1], [0, 1, 0, 2], [0, 0, 1, 3]]
+    testObj = createData('Matrix', data=testData, featureNames=variables)
+    testObjNoLabels = testObj[:, :2]
+
+    learner = 'Custom.KNNClassifier'
+    # Expected outcomes
+    exp = UML.trainAndApply(learner, trainObjData, trainObjLabels, testObjNoLabels)
+    expSelf = UML.trainAndApply(learner, trainObjData, trainObjLabels, trainObjData)
+    # trainY is ID, testX does not contain labels; test int
+    out = UML.trainAndApply(learner, trainObj, 3, testObjNoLabels)
+    assert out == exp
+    # trainY is ID, testX does not contain labels; test string
+    out = UML.trainAndApply(learner, trainObj, 'label', testObjNoLabels)
+    assert out == exp
+    # trainY is Base; testX None
+    out = UML.trainAndApply(learner, trainObjData, trainObjLabels, None)
+    assert out == expSelf
+    # trainY is ID; testX None
+    out = UML.trainAndApply(learner, trainObj, 3, None)
+    assert out == expSelf
+    # Exception trainY is ID; testX contains labels
+    try:
+        out = UML.trainAndApply(learner, trainObj, 3, testObj)
+        assert False # expected ValueError
+    except ValueError:
+        pass
+    try:
+        out = UML.trainAndApply(learner, trainObj, 'label', testObj)
+        assert False # expected ValueError
+    except ValueError:
+        pass
+    # Exception trainY is Base; testX contains labels
+    try:
+        out = UML.trainAndApply(learner, trainObjData, trainObjLabels, testObj)
+        assert False # expected ValueError
+    except ValueError:
+        pass
+    # Exception trainY is ID; testX bad shape
+    try:
+        out = UML.trainAndApply(learner, trainObj, 3, testObj[:, 2:])
+        assert False # expected ValueError
+    except ValueError:
+        pass
+
+def test_trainAndTest_dataInputs():
+    variables = ["x1", "x2", "x3", "label"]
+    numPoints = 20
+    data = [[pythonRandom.random(), pythonRandom.random(), pythonRandom.random(), int(pythonRandom.random() * 3) + 1]
+             for _pt in range(numPoints)]
+    trainObj = createData('Matrix', data=data, featureNames=variables)
+    trainObjData = trainObj[:, :2]
+    trainObjLabels = trainObj[:, 3]
+
+    testData = [[1, 0, 0, 1], [0, 1, 0, 2], [0, 0, 1, 3]]
+    testObj = createData('Matrix', data=testData, featureNames=variables)
+    testObjData = testObj[:, :2]
+    testObjLabels = testObj[:, 3]
+
+    learner = 'Custom.KNNClassifier'
+    # Expected outcomes
+    exp = UML.trainAndTest(learner, trainObjData, trainObjLabels, testObjData, testObjLabels, fractionIncorrect)
+    # trainX and testX contain labels
+    out1 = UML.trainAndTest(learner, trainObj, 3, testObj, 3, fractionIncorrect)
+    out2 = UML.trainAndTest(learner, trainObj, 'label', testObj, 'label', fractionIncorrect)
+    assert out1 == exp
+    assert out2 == exp
+    # trainX contains labels
+    out3 = UML.trainAndTest(learner, trainObj, 3, testObjData, testObjLabels, fractionIncorrect)
+    assert out3 == exp
+    # testX contains labels
+    out4 = UML.trainAndTest(learner, trainObjData, trainObjLabels, testObj, 3, fractionIncorrect)
+    assert out4 == exp
 
 #todo set seed and verify that you can regenerate error several times with
-#crossValidateReturnBest, trainAndApply, and your own computeMetrics
+#crossValidate.bestArguments, trainAndApply, and your own computeMetrics
 def test_trainAndTest():
     """Assert valid results returned for different arguments to the algorithm:
     with default ie no args
@@ -45,13 +127,15 @@ def test_trainAndTest():
     assert isinstance(runError, float)
 
     #with multiple values for one argument for the algorithm
-    runError = trainAndTest('Custom.KNNClassifier', trainObj1, 3, testObj1, 3, fractionIncorrect, k=(1, 2))
+    runError = trainAndTest('Custom.KNNClassifier', trainObj1, 3, testObj1, 3,
+                            fractionIncorrect, k=UML.CV([1, 2]), numFolds=3)
     assert isinstance(runError, float)
 
     #with small data set
     data1 = [[1, 0, 0, 1], [0, 1, 0, 2], [0, 0, 1, 3], [1, 0, 0, 1], [0, 1, 0, 2]]
     trainObj1 = createData('Matrix', data=data1, featureNames=variables)
-    runError = trainAndTest('Custom.KNNClassifier', trainObj1, 3, testObj1, 3, fractionIncorrect, k=(1, 2))
+    runError = trainAndTest('Custom.KNNClassifier', trainObj1, 3, testObj1, 3,
+                            fractionIncorrect, k=UML.CV([1, 2]), numFolds=3)
     assert isinstance(runError, float)
 
 
@@ -64,8 +148,8 @@ def test_multioutput_learners_callable_from_all():
             [2, -2]]
     trainY = UML.createData('Matrix', data)
 
-    trainY0 = trainY.copyFeatures(0)
-    trainY1 = trainY.copyFeatures(1)
+    trainY0 = trainY.features.copy(0)
+    trainY1 = trainY.features.copy(1)
 
     data = [[5, 5, 5], [0, 0, 1]]
     testX = UML.createData('Matrix', data)
@@ -73,8 +157,8 @@ def test_multioutput_learners_callable_from_all():
     data = [[555, -555], [1, -1]]
     testY = UML.createData('Matrix', data)
 
-    testY0 = testY.copyFeatures(0)
-    testY1 = testY.copyFeatures(1)
+    testY0 = testY.features.copy(0)
+    testY1 = testY.features.copy(1)
 
     testName = 'Custom.MultiOutputRidgeRegression'
     wrappedName = 'Custom.RidgeRegression'
@@ -112,6 +196,17 @@ def test_multioutput_learners_callable_from_all():
     ret_TTTD_1 = UML.trainAndTestOnTrainingData(wrappedName, trainX=trainX, trainY=trainY1, performanceFunction=metric,
                                                 lamb=1)
 
+    # Control randomness for each cross-validation so folds are consistent
+    UML.randomness.startAlternateControl(seed=0)
+    ret_TTTD_multi_cv = UML.trainAndTestOnTrainingData(testName, trainX=trainX, trainY=trainY, performanceFunction=metric,
+                                                       lamb=1, crossValidationError=True)
+    UML.randomness.setRandomSeed(0)
+    ret_TTTD_0_cv = UML.trainAndTestOnTrainingData(wrappedName, trainX=trainX, trainY=trainY0, performanceFunction=metric,
+                                                   lamb=1, crossValidationError=True)
+    UML.randomness.setRandomSeed(0)
+    ret_TTTD_1_cv = UML.trainAndTestOnTrainingData(testName, trainX=trainX, trainY=trainY1, performanceFunction=metric,
+                                                   lamb=1, crossValidationError=True)
+    UML.randomness.endAlternateControl()
 
     # tl.test()
     ret_TLT_multi = TLmulti.test(testX, testY, metric)
@@ -138,6 +233,9 @@ def test_multioutput_learners_callable_from_all():
     assert ret_TTTD_multi == ret_TTTD_0
     assert ret_TTTD_multi == ret_TTTD_1
 
+    assert ret_TTTD_multi_cv == ret_TTTD_0_cv
+    assert ret_TTTD_multi_cv == ret_TTTD_1_cv
+
     assert ret_TLT_multi == ret_TLT_0
     assert ret_TLT_multi == ret_TLT_1
 
@@ -159,7 +257,7 @@ def test_multioutput_learners_callable_from_all():
     assert ret_TLT_multi == ret_TT_1
 
 
-@raises(ArgumentException)
+@raises(InvalidArgumentValueCombination)
 def test_train_multiclassStrat_disallowed_multioutput():
     data = [[0, 1, 0], [0, 0, 2], [12, 0, 0], [2, 2, 2], [0, 1, 0], [0, 0, 2], [12, 0, 0], [2, 2, 2], [0, 1, 0],
             [0, 0, 2], ]
@@ -174,7 +272,7 @@ def test_train_multiclassStrat_disallowed_multioutput():
     TLmulti = UML.train(testName, trainX=trainX, trainY=trainY, multiClassStrategy='OneVsOne', lamb=1)
 
 
-@raises(ArgumentException)
+@raises(InvalidArgumentValueCombination)
 def test_trainAndApply_scoreMode_disallowed_multiOutput():
     data = [[0, 1, 0], [0, 0, 2], [12, 0, 0], [2, 2, 2], [0, 1, 0], [0, 0, 2], [12, 0, 0], [2, 2, 2], [0, 1, 0],
             [0, 0, 2], ]
@@ -192,7 +290,7 @@ def test_trainAndApply_scoreMode_disallowed_multiOutput():
     UML.trainAndApply(testName, trainX=trainX, trainY=trainY, testX=testX, scoreMode="allScores", lamb=1)
 
 
-@raises(ArgumentException)
+@raises(InvalidArgumentValueCombination)
 def test_trainAndApply_multiClassStrat_disallowed_multiOutput():
     data = [[0, 1, 0], [0, 0, 2], [12, 0, 0], [2, 2, 2], [0, 1, 0], [0, 0, 2], [12, 0, 0], [2, 2, 2], [0, 1, 0],
             [0, 0, 2], ]
@@ -210,7 +308,7 @@ def test_trainAndApply_multiClassStrat_disallowed_multiOutput():
     UML.trainAndApply(testName, trainX=trainX, trainY=trainY, testX=testX, multiClassStrategy="OneVsOne", lamb=1)
 
 
-@raises(ArgumentException)
+@raises(InvalidArgumentValueCombination)
 def test_trainAndTest_scoreMode_disallowed_multioutput():
     data = [[0, 1, 0], [0, 0, 2], [12, 0, 0], [2, 2, 2], [0, 1, 0], [0, 0, 2], [12, 0, 0], [2, 2, 2], [0, 1, 0],
             [0, 0, 2], ]
@@ -233,7 +331,7 @@ def test_trainAndTest_scoreMode_disallowed_multioutput():
                      scoreMode="allScores", lamb=1)
 
 
-@raises(ArgumentException)
+@raises(InvalidArgumentValueCombination)
 def test_trainAndTestOnTrainingData_scoreMode_disallowed_multioutput():
     data = [[0, 1, 0], [0, 0, 2], [12, 0, 0], [2, 2, 2], [0, 1, 0], [0, 0, 2], [12, 0, 0], [2, 2, 2], [0, 1, 0],
             [0, 0, 2], ]
@@ -250,7 +348,7 @@ def test_trainAndTestOnTrainingData_scoreMode_disallowed_multioutput():
                                    scoreMode="allScores", lamb=1)
 
 
-@raises(ArgumentException)
+@raises(InvalidArgumentValueCombination)
 def test_trainAndTest_multiclassStrat_disallowed_multioutput():
     data = [[0, 1, 0], [0, 0, 2], [12, 0, 0], [2, 2, 2], [0, 1, 0], [0, 0, 2], [12, 0, 0], [2, 2, 2], [0, 1, 0],
             [0, 0, 2], ]
@@ -273,7 +371,7 @@ def test_trainAndTest_multiclassStrat_disallowed_multioutput():
                      multiClassStrategy="OneVsOne", lamb=1)
 
 
-@raises(ArgumentException)
+@raises(InvalidArgumentValueCombination)
 def test_trainAndTestOnTrainingData_multiclassStrat_disallowed_multioutput():
     data = [[0, 1, 0], [0, 0, 2], [12, 0, 0], [2, 2, 2], [0, 1, 0], [0, 0, 2], [12, 0, 0], [2, 2, 2], [0, 1, 0],
             [0, 0, 2], ]
@@ -290,6 +388,79 @@ def test_trainAndTestOnTrainingData_multiclassStrat_disallowed_multioutput():
                                    multiClassStrategy="OneVsOne", lamb=1)
 
 
+def test_trainFunctions_cv_triggered_errors():
+    variables = ["x1", "x2", "x3", "label"]
+    numPoints = 10
+    data = [[pythonRandom.random(), pythonRandom.random(), pythonRandom.random(), int(pythonRandom.random() * 3) + 1]
+             for _pt in range(numPoints)]
+    trainObj = createData('Matrix', data=data, featureNames=variables)
+    trainObjData = trainObj[:, :2]
+    trainObjLabels = trainObj[:, 3]
+
+    testData = [[1, 0, 0, 1], [0, 1, 0, 2], [0, 0, 1, 3]]
+    testObj = createData('Matrix', data=testData, featureNames=variables)
+    testObjData = testObj[:, :2]
+    testObjLabels = testObj[:, 3]
+
+    learner = 'Custom.KNNClassifier'
+    # no performanceFunction (only train and trainAndApply; required in Test functions)
+    try:
+        UML.train(learner, trainObjData, trainObjLabels, k=UML.CV([1, 3]))
+        assert False # expect InvalidArgumentValueCombination
+    except InvalidArgumentValueCombination as iavc:
+        assert "performanceFunction" in str(iavc)
+    try:
+        UML.trainAndApply(learner, trainObjData, trainObjLabels, testObjData,
+                          k=UML.CV([1, 3]))
+        assert False # expect InvalidArgumentValueCombination
+    except InvalidArgumentValueCombination as iavc:
+        assert "performanceFunction" in str(iavc)
+
+    # numFolds too large
+    try:
+        UML.train(learner, trainObjData, trainObjLabels,
+                  performanceFunction=fractionIncorrect, k=UML.CV([1, 3]), numFolds=11)
+        assert False # expect InvalidArgumentValueCombination
+    except InvalidArgumentValueCombination as iavc:
+        assert "numFolds" in str(iavc)
+    try:
+        UML.trainAndApply(learner, trainObjData, trainObjLabels, testObjData,
+                          performanceFunction=fractionIncorrect, k=UML.CV([1, 3]), numFolds=11)
+        assert False # expect InvalidArgumentValueCombination
+    except InvalidArgumentValueCombination as iavc:
+        assert "numFolds" in str(iavc)
+    try:
+        UML.trainAndTest(learner, trainObjData, trainObjLabels, testObjData,
+                         testObjLabels, performanceFunction=fractionIncorrect,
+                         k=UML.CV([1, 3]), numFolds=11)
+        assert False # expect InvalidArgumentValueCombination
+    except InvalidArgumentValueCombination as iavc:
+        assert "numFolds" in str(iavc)
+    try:
+        # training error
+        UML.trainAndTestOnTrainingData(learner, trainObjData, trainObjLabels,
+                                       performanceFunction=fractionIncorrect,
+                                       k=UML.CV([1, 3]), numFolds=11)
+        assert False # expect InvalidArgumentValueCombination
+    except InvalidArgumentValueCombination as iavc:
+        assert "numFolds" in str(iavc)
+    try:
+        # cross-validation error
+        UML.trainAndTestOnTrainingData(learner, trainObjData, trainObjLabels,
+                                       performanceFunction=fractionIncorrect,
+                                       crossValidationError=True, numFolds=11)
+        assert False # expect InvalidArgumentValueCombination
+    except InvalidArgumentValue as iavc:
+        # different exception since this triggers crossValidation directly
+        assert "folds" in str(iavc)
+
+class CVWasCalledException(Exception):
+    pass
+
+def cvBackgroundCheck(*args, **kwargs):
+    raise CVWasCalledException()
+
+@mock.patch('UML.uml.crossValidate', cvBackgroundCheck)
 def test_frontend_CV_triggering():
     #with small data set
     variables = ["x1", "x2", "x3"]
@@ -298,53 +469,57 @@ def test_frontend_CV_triggering():
     trainObj = createData('Matrix', data=data, featureNames=variables)
     labelsObj = createData("Matrix", data=labels)
 
-    class CVWasCalledException(Exception):
-        pass
-
-    def cvBackgroundCheck():
-        raise CVWasCalledException()
-
-    temp = UML.helpers.crossValidateBackend
-    UML.helpers.crossValidateBackend = cvBackgroundCheck
-
     # confirm that the calls are being made
     try:
         try:
             train('Custom.KNNClassifier', trainX=trainObj, trainY=labelsObj,
-                  performanceFunction=fractionIncorrect, k=(1, 2))
+                  performanceFunction=fractionIncorrect, k=UML.CV([1, 2]), numFolds=5)
+            assert False # expected CVWasCalledException
         except CVWasCalledException:
             pass
 
         try:
             trainAndApply('Custom.KNNClassifier', trainX=trainObj, trainY=labelsObj,
-                          performanceFunction=fractionIncorrect, testX=trainObj, k=(1, 2))
+                          performanceFunction=fractionIncorrect, testX=trainObj, k=UML.CV([1, 2]),
+                          numFolds=5)
+            assert False # expected CVWasCalledException
         except CVWasCalledException:
             pass
 
         try:
             trainAndTest('Custom.KNNClassifier', trainX=trainObj, trainY=labelsObj,
                          testX=trainObj, testY=labelsObj, performanceFunction=fractionIncorrect,
-                         k=(1, 2))
+                         k=UML.CV([1, 2]), numFolds=5)
+            assert False # expected CVWasCalledException
         except CVWasCalledException:
             pass
     except Exception:
         einfo = sys.exc_info()
-        six.reraise(einfo[1], None, einfo[2])
-    finally:
-        UML.helpers.crossValidateBackend = temp
+        six.reraise(*einfo)
 
-    # demonstrate some succesful calls
+def test_frontend_CV_triggering_success():
+    #with small data set
+    variables = ["x1", "x2", "x3"]
+    data = [[1, 0, 0], [0, 1, 0], [0, 0, 1], [1, 0, 0], [0, 1, 0]]
+    labels = [[1], [2], [3], [1], [2]]
+    trainObj = createData('Matrix', data=data, featureNames=variables)
+    labelsObj = createData("Matrix", data=labels)
+
     tl = train('Custom.KNNClassifier', trainX=trainObj, trainY=labelsObj,
-               performanceFunction=fractionIncorrect, k=(1, 2))
+               performanceFunction=fractionIncorrect, k=UML.CV([1, 2]), numFolds=5)
     assert hasattr(tl, 'apply')
+    assert tl.crossValidation is not None
+    assert tl.crossValidation.performanceFunction == fractionIncorrect
+    assert tl.crossValidation.numFolds == 5
 
     result = trainAndApply('Custom.KNNClassifier', trainX=trainObj, trainY=labelsObj,
-                           testX=trainObj, performanceFunction=fractionIncorrect, k=(1, 2))
+                           testX=trainObj, performanceFunction=fractionIncorrect, k=UML.CV([1, 2]),
+                           numFolds=5)
     assert isinstance(result, UML.data.Matrix)
 
     error = trainAndTest('Custom.KNNClassifier', trainX=trainObj, trainY=labelsObj,
                          testX=trainObj, testY=labelsObj, performanceFunction=fractionIncorrect,
-                         k=(1, 2))
+                         k=UML.CV([1, 2]), numFolds=5)
     assert isinstance(error, float)
 
 
@@ -359,14 +534,80 @@ def test_train_trainAndApply_perfFunc_reqForCV():
     # Default value of performanceFunction is None, which since we're doing
     # CV should fail
     try:
-        tl = train('Custom.KNNClassifier', trainX=trainObj, trainY=labelsObj, k=(1, 2))
+        tl = train('Custom.KNNClassifier', trainX=trainObj, trainY=labelsObj, k=UML.CV([1, 2]))
         assert False
-    except ArgumentException:
+    except InvalidArgumentValueCombination:
         pass
 
     try:
         result = trainAndApply('Custom.KNNClassifier', trainX=trainObj, trainY=labelsObj,
-                               testX=trainObj, k=(1, 2))
+                               testX=trainObj, k=UML.CV([1, 2]))
         assert False
-    except ArgumentException:
+    except InvalidArgumentValueCombination:
         pass
+
+def back_logCount(toCall):
+    variables = ["x1", "x2", "x3", "label"]
+    numPoints = 20
+    data = [[pythonRandom.random(), pythonRandom.random(), pythonRandom.random(),
+             int(pythonRandom.random() * 3) + 1] for _pt in range(numPoints)]
+    trainObj = createData('Matrix', data=data, featureNames=variables, useLog=False)
+    trainObjData = trainObj[:, :2]
+    trainObjLabels = trainObj[:, 3]
+
+    testData = [[1, 0, 0, 1], [0, 1, 0, 2], [0, 0, 1, 3]]
+    testObj = createData('Matrix', data=testData, featureNames=variables, useLog=False)
+    testObjData = testObj[:, :2]
+    testObjLabels = testObj[:, 3]
+
+    out = toCall('Custom.KNNClassifier', trainObjData, trainObjLabels, testObjData,
+           testObjLabels, fractionIncorrect)
+
+@oneLogEntryExpected
+def test_train_logCount_noCV():
+    def wrapped(learner, trainX, trainY, testX, testY, performanceFunction):
+        return UML.train(learner, trainX, trainY)
+    back_logCount(wrapped)
+
+@oneLogEntryExpected
+def test_trainAndApply_logCount_noCV():
+    def wrapped(learner, trainX, trainY, testX, testY, performanceFunction):
+        return UML.trainAndApply(learner, trainX, trainY, testX, performanceFunction)
+    back_logCount(wrapped)
+
+@oneLogEntryExpected
+def test_trainAndTest_logCount_noCV():
+    def wrapped(learner, trainX, trainY, testX, testY, performanceFunction):
+        return UML.trainAndTest(learner, trainX, trainY, testX, testY, performanceFunction)
+    back_logCount(wrapped)
+
+@oneLogEntryExpected
+def test_trainAndTestOnTrainingData_logCount_noCV():
+    def wrapped(learner, trainX, trainY, testX, testY, performanceFunction):
+        return UML.trainAndTestOnTrainingData(learner, trainX, trainY, performanceFunction)
+    back_logCount(wrapped)
+
+@logCountAssertionFactory(2)
+def test_train_logCount_withCV():
+    def wrapped(learner, trainX, trainY, testX, testY, performanceFunction):
+        return UML.train(learner, trainX, trainY, performanceFunction=performanceFunction, k=UML.CV([1, 2]))
+    back_logCount(wrapped)
+
+@logCountAssertionFactory(2)
+def test_trainAndApply_logCount_withCV():
+    def wrapped(learner, trainX, trainY, testX, testY, performanceFunction):
+        return UML.trainAndApply(learner, trainX, trainY, testX, performanceFunction, k=UML.CV([1, 2]))
+    back_logCount(wrapped)
+
+@logCountAssertionFactory(2)
+def test_trainAndTest_logCount_withCV():
+    def wrapped(learner, trainX, trainY, testX, testY, performanceFunction):
+        return UML.trainAndTest(learner, trainX, trainY, testX, testY, performanceFunction, k=UML.CV([1, 2]))
+    back_logCount(wrapped)
+
+@logCountAssertionFactory(2)
+def test_trainAndTestOnTrainingData_logCount_withCV():
+    def wrapped(learner, trainX, trainY, testX, testY, performanceFunction):
+        return UML.trainAndTestOnTrainingData(learner, trainX, trainY, performanceFunction, k=UML.CV([1, 2]))
+    back_logCount(wrapped)
+

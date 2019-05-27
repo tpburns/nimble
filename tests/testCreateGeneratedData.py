@@ -11,9 +11,11 @@ import copy
 from nose.tools import *
 
 import UML
-from UML.exceptions import ArgumentException
+from UML.exceptions import InvalidArgumentValue
+from UML.exceptions import InvalidArgumentValueCombination
 from UML import createRandomData
 from six.moves import range
+from .assertionHelpers import noLogEntryExpected, oneLogEntryExpected
 
 
 returnTypes = copy.copy(UML.data.available)
@@ -47,10 +49,10 @@ def testReturnsFundamentalsCorrect():
     for curType in supportedFundamentalTypes:
         for curReturnType in returnTypes:
             for curSparsity in sparsities:
-                returned = createRandomData(curReturnType, nPoints, nFeatures, curSparsity, numericType=curType)
+                returned = createRandomData(curReturnType, nPoints, nFeatures, curSparsity, elementType=curType)
 
-                assert (returned.points == nPoints)
-                assert (returned.features == nFeatures)
+                assert (len(returned.points) == nPoints)
+                assert (len(returned.features) == nFeatures)
 
                 #assert that the requested numerical type was returned
                 assert type(returned[0, 0] == curType)
@@ -74,14 +76,14 @@ def testSparsityReturnedPlausible():
     supportedFundamentalTypes = ['int', 'float']
     sparsities = [0.0, 0.5, .99]
 
-    nPoints = 800
+    nPoints = 500
     nFeatures = 1000
     #sparsity = .5
 
     for curType in supportedFundamentalTypes:
         for curReturnType in returnTypes:
             for curSparsity in sparsities:
-                returned = createRandomData(curReturnType, nPoints, nFeatures, curSparsity, numericType=curType)
+                returned = createRandomData(curReturnType, nPoints, nFeatures, curSparsity, elementType=curType)
 
                 if curReturnType.lower() == 'sparse':
                     nonZerosCount = returned.data.nnz
@@ -90,7 +92,7 @@ def testSparsityReturnedPlausible():
 
                     assert (difference < .01)
                 else:
-                    nonZerosCount = numpy.count_nonzero(returned.copyAs('numpyarray'))
+                    nonZerosCount = numpy.count_nonzero(returned.copy(to='numpyarray'))
                     actualSparsity = 1.0 - nonZerosCount / float(nPoints * nFeatures)
                     difference = abs(actualSparsity - curSparsity)
 
@@ -98,9 +100,48 @@ def testSparsityReturnedPlausible():
 
 
 def test_createRandomizedData_names_passed():
-    raise NotImplementedError
+    '''
+    function that tests:
+    - Given correctly sized lists of strings for pointNames and featureNames
+    arguments, checks if the returned object has those axis names.
 
+    - Validity checking of pointNames and featureNames is not tested
+    since it is done exclusively in createData. We only check for successful
+    behavior.
 
+    - These tests are run for all combinations of the paramaters:
+    supportedFundamentalTypes = ['int', 'float']
+    returnTypes = ['Matrix','Sparse','List']
+    sparsities = [0.0, 0.5, .99]
+    '''
+    supportedFundamentalTypes = ['int', 'float']
+    sparsities = [0.0, 0.5, .99]
+
+    numberPoints = 10
+    numberFeatures = 3
+    pnames = ['p{}'.format(i) for i in range(0, numberPoints)]
+    fnames = ['f{}'.format(i) for i in range(0, numberFeatures)]
+
+    # TODO create a function summarizing the calling of the function with
+    # the different combinations.
+    for curType in supportedFundamentalTypes:
+        for curReturnType in returnTypes:
+            for curSparsity in sparsities:
+                ret = createRandomData(
+                    curReturnType, numberPoints, numberFeatures, curSparsity,
+                    elementType=curType, pointNames=pnames, featureNames=fnames)
+
+                assert ret.points.getNames() == pnames
+                assert ret.features.getNames() == fnames
+
+def test_createRandomData_logCount():
+
+    @oneLogEntryExpected
+    def byType(rType):
+        toTest = UML.createRandomData(rType, 5, 5, 0)
+
+    for t in returnTypes:
+        byType(t)
 
 #todo check that sizes of returned objects are what you request via npoints and nfeatures
 
@@ -114,27 +155,27 @@ def test_createRandomizedData_names_passed():
 def back_constant_sizeChecking(toTest):
     try:
         toTest("Matrix", -1, 5)
-        assert False  # expected ArgmentException for negative numPoints
-    except ArgumentException:
+        assert False  # expected InvalidArgumentValue for negative numPoints
+    except InvalidArgumentValue:
         pass
     except Exception:
-        assert False  # expected ArgmentException for negative numPoints
+        assert False  # expected InvalidArgumentValue for negative numPoints
 
     try:
         toTest("Matrix", 4, -3)
-        assert False  # expected ArgmentException for negative numFeatures
-    except ArgumentException:
+        assert False  # expected InvalidArgumentValue for negative numFeatures
+    except InvalidArgumentValue:
         pass
     except Exception:
-        assert False  # expected ArgmentException for negative numFeatures
+        assert False  # expected InvalidArgumentValue for negative numFeatures
 
     try:
         toTest("Matrix", 0, 0)
-        assert False  # expected ArgmentException for 0 by 0 sized object
-    except ArgumentException:
+        assert False  # expected InvalidArgumentValueCombination for 0 by 0 sized object
+    except InvalidArgumentValueCombination:
         pass
     except Exception:
-        assert False  # expected ArgmentException for 0 by 0 sized object
+        assert False  # expected InvalidArgumentValueCombination for 0 by 0 sized object
 
 
 def back_constant_emptyCreation(toTest):
@@ -160,8 +201,8 @@ def back_constant_correctSizeAndContents(toTest, value):
             ret = toTest(t, size[0], size[1])
             assert t == ret.getTypeString()
 
-            assert ret.points == size[0]
-            assert ret.features == size[1]
+            assert len(ret.points) == size[0]
+            assert len(ret.features) == size[1]
 
             for p in range(size[0]):
                 for f in range(size[1]):
@@ -176,8 +217,8 @@ def back_constant_correctNames(toTest):
     for t in returnTypes:
         ret = toTest(t, 2, 2, pointNames=pnames, featureNames=fnames, name=objName)
 
-        assert ret.getPointNames() == pnames
-        assert ret.getFeatureNames() == fnames
+        assert ret.points.getNames() == pnames
+        assert ret.features.getNames() == fnames
         assert ret.name == objName
 
 
@@ -188,10 +229,20 @@ def back_constant_conversionEqualityBetweenTypes(toTest):
         ret = toTest(makeT, p, f)
 
         for matchT in returnTypes:
-            convertedRet = ret.copyAs(matchT)
+            convertedRet = ret.copy(to=matchT)
             toMatch = toTest(matchT, p, f)
 
             assert convertedRet == toMatch
+
+
+def back_constant_logCount(toTest):
+
+    @noLogEntryExpected
+    def byType(rType):
+        out = toTest(rType, 5, 5)
+
+    for t in returnTypes:
+        byType(t)
 
 
 ############
@@ -202,7 +253,7 @@ def back_constant_conversionEqualityBetweenTypes(toTest):
 
 # This function relies on createData to actually instantiate our data, and
 # never touches the pointNames, featureNames, or names arguments. The
-# validity checking of those arguments is therefore not tested, since 
+# validity checking of those arguments is therefore not tested, since
 # it is done exclusively in createData. We only check for successful behaviour.
 
 def test_ones_sizeChecking():
@@ -225,6 +276,9 @@ def test_ones_conversionEqualityBetweenTypes():
     back_constant_conversionEqualityBetweenTypes(UML.ones)
 
 
+def test_ones_logCount():
+    back_constant_logCount(UML.ones)
+
 #############
 ### zeros ###
 #############
@@ -233,7 +287,7 @@ def test_ones_conversionEqualityBetweenTypes():
 
 # This function relies on createData to actually instantiate our data, and
 # never touches the pointNames, featureNames, or names arguments. The
-# validity checking of those arguments is therefore not tested, since 
+# validity checking of those arguments is therefore not tested, since
 # it is done exclusively in createData. We only check for successful behaviour.
 
 def test_zeros_sizeChecking():
@@ -255,6 +309,9 @@ def test_zeros_correctNames():
 def test_zeros_conversionEqualityBetweenTypes():
     back_constant_conversionEqualityBetweenTypes(UML.zeros)
 
+def test_zeros_logCount():
+    back_constant_logCount(UML.zeros)
+
 
 ################
 ### identity ###
@@ -264,26 +321,26 @@ def test_zeros_conversionEqualityBetweenTypes():
 
 # This function relies on createData to actually instantiate our data, and
 # never touches the pointNames, featureNames, or names arguments. The
-# validity checking of those arguments is therefore not tested, since 
+# validity checking of those arguments is therefore not tested, since
 # it is done exclusively in createData. We only check for successful behaviour.
 
 
 def test_identity_sizeChecking():
     try:
         UML.identity("Matrix", -1)
-        assert False  # expected ArgmentException for negative size
-    except ArgumentException:
+        assert False  # expected InvalidArgumentValue for negative size
+    except InvalidArgumentValue:
         pass
     except Exception:
-        assert False  # expected ArgmentException for negative size
+        assert False  # expected InvalidArgumentValue for negative size
 
     try:
         UML.identity("Matrix", 0)
-        assert False  # expected ArgmentException for 0 valued size
-    except ArgumentException:
+        assert False  # expected InvalidArgumentValue for 0 valued size
+    except InvalidArgumentValue:
         pass
     except Exception:
-        assert False  # expected ArgmentException for 0 valued size
+        assert False  # expected InvalidArgumentValue for 0 valued size
 
 
 def test_identity_correctSizeAndContents():
@@ -307,8 +364,8 @@ def test_identity_correctNames():
     for t in returnTypes:
         ret = UML.identity(t, 2, pointNames=pnames, featureNames=fnames, name=objName)
 
-        assert ret.getPointNames() == pnames
-        assert ret.getFeatureNames() == fnames
+        assert ret.points.getNames() == pnames
+        assert ret.features.getNames() == fnames
         assert ret.name == objName
 
 
@@ -319,10 +376,18 @@ def test_identity_conversionEqualityBetweenTypes():
         ret = UML.identity(makeT, size)
 
         for matchT in returnTypes:
-            convertedRet = ret.copyAs(matchT)
+            convertedRet = ret.copy(to=matchT)
             toMatch = UML.identity(matchT, size)
 
             assert convertedRet == toMatch
 
+def test_identity_logCount():
+
+    @noLogEntryExpected
+    def byType(rType):
+        toTest = UML.identity(rType, 5)
+
+    for t in returnTypes:
+        byType(t)
 
 # EOF Marker
