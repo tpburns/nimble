@@ -11,6 +11,9 @@ from __future__ import absolute_import
 
 from .confidence import confidenceIntervalHelper
 
+from .matrix import elementwiseMultiply
+from .matrix import elementwisePower
+
 from .loss import meanSquareLoss
 from .loss import rootMeanSquareLoss
 from .loss import sumSquareLoss
@@ -24,8 +27,7 @@ from .loss import l1Loss
 from .loss import meanAbsoluteError
 from .loss import meanFeaturewiseRootMeanSquareError
 from .loss import varianceFractionRemaining
-from .matrix import elementwiseMultiply
-from .matrix import elementwisePower
+
 from .similarity import correlation
 from .similarity import cosineSimilarity
 from .similarity import covariance
@@ -42,7 +44,9 @@ from .statistic import proportionZero
 from .statistic import quartiles
 from .statistic import residuals
 from .statistic import standardDeviation
+
 from .utility import detectBestResult
+
 from .linalg import inverse
 from .linalg import pseudoInverse
 from .linalg import solve
