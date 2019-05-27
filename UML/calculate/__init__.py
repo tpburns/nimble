@@ -10,10 +10,19 @@ arguments.
 from __future__ import absolute_import
 
 from .confidence import confidenceIntervalHelper
-from .loss import fractionIncorrect
+
+from .loss import meanSquareLoss
+from .loss import rootMeanSquareLoss
+from .loss import sumSquareLoss
+from .loss import crossEntropyLoss
+from .loss import exponentialLoss
+from .loss import quadraticLoss
+from .loss import hingeLoss
+from .loss import fractionIncorrectLoss
+from .loss import l2Loss
+from .loss import l1Loss
 from .loss import meanAbsoluteError
 from .loss import meanFeaturewiseRootMeanSquareError
-from .loss import rootMeanSquareError
 from .loss import varianceFractionRemaining
 from .matrix import elementwiseMultiply
 from .matrix import elementwisePower
@@ -39,12 +48,40 @@ from .linalg import pseudoInverse
 from .linalg import solve
 from .linalg import leastSquaresSolution
 
-__all__ = ['confidenceIntervalHelper', 'correlation', 'cosineSimilarity',
-           'covariance', 'detectBestResult', 'elementwiseMultiply',
-           'elementwisePower', 'fractionCorrect', 'fractionIncorrect',
-           'maximum', 'mean', 'meanAbsoluteError',
-           'meanFeaturewiseRootMeanSquareError', 'median', 'mode', 'minimum',
-           'proportionMissing', 'proportionZero', 'quartiles',
-           'residuals', 'rSquared', 'rootMeanSquareError', 'standardDeviation',
-           'uniqueCount', 'varianceFractionRemaining', 'inverse',
-           'pseudoInverse', 'solve', 'leastSquaresSolution']
+__all__ = ['meanSquareLoss',
+           'rootMeanSquareLoss',
+           'sumSquareLoss',
+           'crossEntropyLoss',
+           'exponentialLoss',
+           'quadraticLoss',
+           'hingeLoss',
+           'fractionIncorrectLoss',
+           'l2Loss',
+           'l1Loss',
+           'meanAbsoluteError',
+           'meanFeaturewiseRootMeanSquareError',
+           'varianceFractionRemaining',
+           'confidenceIntervalHelper',
+           'correlation',
+           'cosineSimilarity',
+           'covariance',
+           'detectBestResult',
+           'elementwiseMultiply',
+           'elementwisePower',
+           'fractionCorrect',
+           'maximum',
+           'mean',
+           'median',
+           'mode',
+           'minimum',
+           'proportionMissing',
+           'proportionZero',
+           'quartiles',
+           'residuals',
+           'rSquared',
+           'standardDeviation',
+           'uniqueCount',
+           'inverse',
+           'pseudoInverse',
+           'solve',
+           'leastSquaresSolution']
