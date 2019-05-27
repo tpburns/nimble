@@ -17,6 +17,7 @@ from UML.exceptions import InvalidArgumentType
 from UML.exceptions import InvalidArgumentValue
 from UML.exceptions import InvalidArgumentTypeCombination
 from UML.exceptions import InvalidArgumentValueCombination
+from UML.calculate import  elementwisePower
 
 
 from six.moves import range
@@ -56,9 +57,9 @@ def _validate(knownValues, predictedValues):
 
 def _toNumpyArray(values):
     if len(values.points) > 1:
-        return values.copyAs('numpy array', rowsArePoints=False).flatten()
+        return values.copy(to='numpy array', rowsArePoints=False).flatten()
     else:
-        return values.copyAs('numpy array', rowsArePoints=True).flatten()
+        return values.copy(to='numpy array', rowsArePoints=True).flatten()
 
 
 def _formatInputs(knownValues, predictedValues):
@@ -129,11 +130,9 @@ def sumSquareLoss(knownValues, predictedValues):
     numerical values, rather than categorical data.
     """
     _validate(knownValues, predictedValues)
-    knownValues, predictedValues = _formatInputs(knownValues,
-                                                 predictedValues)
-    difference = knownValues - predictedValues
-    sum_square_error = numpy.asscalar(difference.dot(difference.T))
-    return sum_square_error
+
+    diffObj = knownValues - predictedValues
+    return sum(elementwisePower(diffObj, 2))
 
 
 sumSquareLoss.optimal = 'min'
@@ -173,10 +172,10 @@ def crossEntropyLoss(knownValues, predictedValues, eps=1e-15):
     numpy.clip(predictedValues, eps, 1 - eps)
 
     label_1 = knownValues.dot(numpy.log(predictedValues).T)
-    lable_0 = (1 - knownValues).dot(numpy.log(1 - predictedValues).T)
+    label_0 = (1 - knownValues).dot(numpy.log(1 - predictedValues).T)
 
     try:
-        return - numpy.asarray(label_1 + lable_0) / predictedValues.size
+        return - numpy.asarray(label_1 + label_0) / predictedValues.size
     except ZeroDivisionError:
         raise ZeroDivisionError(
             'Tried to divide by zero when calculating metric. predictedValues size is 0')
