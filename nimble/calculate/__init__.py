@@ -33,6 +33,7 @@ from .similarity import cosineSimilarity
 from .similarity import covariance
 from .similarity import fractionCorrect
 from .similarity import rSquared
+
 from .statistic import maximum
 from .statistic import mean
 from .statistic import median

@@ -2,19 +2,83 @@ from __future__ import absolute_import
 
 import numpy
 from nose.tools import *
+from sklearn
 
 import nimble
 from nimble import createData
 from nimble.exceptions import InvalidArgumentType, InvalidArgumentValue
 from nimble.exceptions import InvalidArgumentValueCombination
+
+from nimble.calculate import meanSquareLoss
+from nimble.calculate import rootMeanSquareLoss
+from nimble.calculate import sumSquareLoss
+from nimble.calculate import crossEntropyLoss
+from nimble.calculate import exponentialLoss
+from nimble.calculate import quadraticLoss
+from nimble.calculate import hingeLoss
+
 from nimble.calculate import meanAbsoluteError
-from nimble.calculate import rootMeanSquareError
 from nimble.calculate import meanFeaturewiseRootMeanSquareError
 from nimble.calculate import fractionCorrect
-from nimble.calculate import fractionIncorrect
+from nimble.calculate import fractionIncorrectLoss
 from nimble.calculate import rSquared
 from nimble.calculate import varianceFractionRemaining
 from ..assertionHelpers import noLogEntryExpected
+
+##################
+# meanSquareLoss #
+##################
+def testMeanSquareLossSucces():
+    predictedLabels = numpy.array([1.0, 2.0, 3.0])
+    knownLabels = numpy.array([1.5, 2.5, 3.5])
+    expVal = meanSquareLoss(predictedLabels, knownLabels)
+
+    for dataType in nimble.data.available:
+        predictedLabelsObj = createData('dataType', predictedLabels)
+        knownLabelsObj = createData('dataType', knownLabels)
+        retVal = meanSquareLoss(predictedLabelsObj, knownLabelsObj)
+
+    assert expVal == retVal
+
+
+######################
+# rootMeanSquareLoss #
+######################
+
+def testRootSquareLostSucces():
+    predictedLabels = numpy.array([1.0, 2.0, 3.0])
+    knownLabels = numpy.array([1.5, 2.5, 3.5])
+
+
+##################
+# sumSquareLoss #
+##################
+
+def testSumSquareLostSucces():
+    predictedLabels = numpy.array([1.0, 2.0, 3.0])
+    knownLabels = numpy.array([1.5, 2.5, 3.5])
+
+
+####################
+# crossEntropyLoss #
+####################
+
+
+
+###################
+# exponentialLoss #
+###################
+
+
+#################
+# quadraticLoss #
+#################
+
+
+#############
+# hingeLoss #
+#############
+
 
 #################
 # _computeError #
