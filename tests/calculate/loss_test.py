@@ -2,7 +2,7 @@ from __future__ import absolute_import
 
 import numpy
 from nose.tools import *
-from sklearn
+from sklearn.metrics import mean_squared_error
 
 import nimble
 from nimble import createData
@@ -71,18 +71,9 @@ def testSumSquareLostSucces():
 
 
 #################
-# quadraticLoss #
-#################
-
-
-#############
-# hingeLoss #
-#############
-
-
-#################
 # _computeError #
 #################
+
 
 @raises(InvalidArgumentValue)
 def testGenericErrorCalculatorEmptyKnownInput():
@@ -574,3 +565,7 @@ def testRSquared():
 
     rsq = rSquared(knownLabelsMatrix, predictedLabelsMatrix)
     assert rsq == 0.6
+
+
+def _backendSimmilaritySucces(toCall, knownValues, predictedValues, toCall):
+    pass
