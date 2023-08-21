@@ -44,6 +44,7 @@ jobs:
             3.8
             3.9
             3.10
+            3.11
           cache: 'pip'
           cache-dependency-path: pyproject.toml
 
@@ -52,8 +53,8 @@ jobs:
         # Allows us to specify cibuildwheel specific environment variables.
         # Included in the comment was something helpful to limit the build
         # output during trialing.
-#        env:
-#          CIBW_PROJECT_REQUIRES_PYTHON: ">=3.9, <3.10"
+        env:
+          CIBW_PROJECT_REQUIRES_PYTHON: ">=3.11, <3.12"
         with:
           output-dir: wheelhouse
 
