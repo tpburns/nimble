@@ -6,6 +6,7 @@ on:
     branches:
       - dev
       - nini/AutomatedTests
+      - tpburns:nini/AutomatedTests
 
 jobs:
   build-wheels:
