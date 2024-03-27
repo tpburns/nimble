@@ -6,6 +6,7 @@ from six.moves import range
 
 gFileName = None
 
+
 def report(fileName=None, sort=None, n=25, stripDirs=False):
     """
     This function is to read a report and sort it by either cumtime and tottime
