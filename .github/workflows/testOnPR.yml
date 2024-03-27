@@ -5,7 +5,7 @@ on:
   pull_request:
     branches:
       - dev
-      - nini/githubActionsTests
+      - nini/AutomatedTests
 
 jobs:
   build-wheels:
