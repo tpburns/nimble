@@ -86,7 +86,8 @@ all = [
 
 
 [project.urls]
-"Homepage" = "https://willfind.github.io/nimble/index.html"
+"Homepage" = "https://www.nimbledata.org"
+"Repository" = "https://github.com/willfind/nimble"
 
 
 [tool.setuptools.packages.find]

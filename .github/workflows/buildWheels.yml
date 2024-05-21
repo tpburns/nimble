@@ -50,12 +50,12 @@ jobs:
       - name: Build wheels
         uses: pypa/cibuildwheel@v2.17.0
         # Allows us to specify cibuildwheel specific environment variables.
-        env:
+#        env:
           # Using the input to specifify the matrix, we will either build all
           # python versions for this OS sequentially (default), or build
           # the specified versions in parallel. Can also be used to limit o
           # only a specific version
-          CIBW_BUILD: ${{ matrix.pyVer}}-*
+#          CIBW_BUILD: ${{ matrix.pyVer}}-*
           #CIBW_PROJECT_REQUIRES_PYTHON: ">=3.9, <3.11"
         with:
           output-dir: wheelhouse
